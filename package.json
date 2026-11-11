@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "PYTHONPATH=.python_packages python3 app.py",
-    "build": "PYTHONPATH=.python_packages python3 -m py_compile app.py models.py safety.py routing.py geocoding.py storage.py data_sources.py",
+    "build": "PYTHONPATH=.python_packages python3 -m py_compile main.py app.py models.py safety.py routing.py geocoding.py storage.py data_sources.py",
     "start": "PYTHONPATH=.python_packages python3 app.py",
-    "lint": "PYTHONPATH=.python_packages python3 -m py_compile app.py",
+    "lint": "PYTHONPATH=.python_packages python3 -m py_compile main.py app.py",
     "test": "PYTHONPATH=.python_packages python3 -m unittest discover tests"
   },
   "dependencies": {
