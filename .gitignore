@@ -12,6 +12,7 @@ __pycache__/
 # Build and distributions
 build/
 dist/
+_site/
 coverage/
 
 # OS & Logs

@@ -3964,6 +3964,13 @@ body {
 set_website_title("SafeCycle — A Safety-First Bike GPS and Route Planner")
 set_website_framed(False)
 hide_debug_information()
+set_site_information(
+    author="dKleintop",
+    description="SafeCycle Delaware: A safety-first bicycle routing engine and interactive map discovering safest, balanced, and direct corridors with paved shoulder and bike lane analysis.",
+    sources="DelDOT Open Data, OpenStreetMap Delaware, University of Delaware GIS, Delaware State Parks",
+    planning="Balanced bicycle routing prioritizing protected infrastructure, paved shoulders, low traffic volumes, and user preference tradeoffs.",
+    links="https://github.com/dKleintop/Safe-Cycle-Drafter"
+)
 
 # --- Helper Navigation Component ---
 def render_navbar(active_page: str, beta_mode: bool = False) -> Component:
@@ -6922,15 +6929,19 @@ def pick_preset_newark(state: State) -> Page:
 
 # --- Server Startup ---
 if __name__ == "__main__":
-    import socket
-    import time
-    import urllib.request
-
-    try:
-        import drafter.config.app_server
-        drafter.config.app_server.DEFAULT_PORT = 3000
-    except Exception:
+    import os
+    if os.environ.get("DRAFTER_SKIP", "").lower() in ("true", "1", "yes") or os.environ.get("CI", "").lower() in ("true", "1", "yes"):
         pass
+    else:
+        import socket
+        import time
+        import urllib.request
+
+        try:
+            import drafter.config.app_server
+            drafter.config.app_server.DEFAULT_PORT = 3000
+        except Exception:
+            pass
 
     # Ensure port 3000 is free before starting
     for _ in range(6):

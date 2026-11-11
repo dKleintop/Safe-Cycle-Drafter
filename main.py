@@ -3965,6 +3965,13 @@ body {
 set_website_title("SafeCycle — A Safety-First Bike GPS and Route Planner")
 set_website_framed(False)
 hide_debug_information()
+set_site_information(
+    author="dKleintop",
+    description="SafeCycle Delaware: A safety-first bicycle routing engine and interactive map discovering safest, balanced, and direct corridors with paved shoulder and bike lane analysis.",
+    sources="DelDOT Open Data, OpenStreetMap Delaware, University of Delaware GIS, Delaware State Parks",
+    planning="Balanced bicycle routing prioritizing protected infrastructure, paved shoulders, low traffic volumes, and user preference tradeoffs.",
+    links="https://github.com/dKleintop/Safe-Cycle-Drafter"
+)
 
 # --- Helper Navigation Component ---
 def render_navbar(active_page: str, beta_mode: bool = False) -> Component:
@@ -6930,48 +6937,52 @@ except Exception as _e:
     print(f"Bakery assertion check: {_e}")
 
 if __name__ == "__main__":
-    import socket
-    import time
-    import urllib.request
-
-    try:
-        import drafter.config.app_server
-        drafter.config.app_server.DEFAULT_PORT = 3000
-    except Exception:
+    import os
+    if os.environ.get("DRAFTER_SKIP", "").lower() in ("true", "1", "yes") or os.environ.get("CI", "").lower() in ("true", "1", "yes"):
         pass
+    else:
+        import socket
+        import time
+        import urllib.request
 
-    # Ensure port 3000 is free before starting
-    for _ in range(6):
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(0.5)
-                if s.connect_ex(('127.0.0.1', 3000)) == 0:
-                    try:
-                        req = urllib.request.Request("http://127.0.0.1:3000/__drafter_stop_server", method="POST")
-                        urllib.request.urlopen(req, timeout=0.8)
-                    except Exception:
-                        pass
-                    try:
-                        import subprocess, signal
-                        out = subprocess.getoutput("ss -lptn 'sport = :3000'")
-                        for m in re.finditer(r'pid=(\d+)', out):
-                            p = int(m.group(1))
-                            if p != os.getpid():
-                                os.kill(p, signal.SIGKILL)
-                    except Exception:
-                        pass
-                    time.sleep(0.5)
-                else:
-                    break
+            import drafter.config.app_server
+            drafter.config.app_server.DEFAULT_PORT = 3000
         except Exception:
-            break
+            pass
 
-    start_server(
-        State(),
-        port=3000,
-        host="0.0.0.0",
-        open_browser=False,
-        in_debug_mode=False,
-        framed=False,
-        use_reloader=False
-    )
+        # Ensure port 3000 is free before starting
+        for _ in range(6):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.5)
+                    if s.connect_ex(('127.0.0.1', 3000)) == 0:
+                        try:
+                            req = urllib.request.Request("http://127.0.0.1:3000/__drafter_stop_server", method="POST")
+                            urllib.request.urlopen(req, timeout=0.8)
+                        except Exception:
+                            pass
+                        try:
+                            import subprocess, signal
+                            out = subprocess.getoutput("ss -lptn 'sport = :3000'")
+                            for m in re.finditer(r'pid=(\d+)', out):
+                                p = int(m.group(1))
+                                if p != os.getpid():
+                                    os.kill(p, signal.SIGKILL)
+                        except Exception:
+                            pass
+                        time.sleep(0.5)
+                    else:
+                        break
+            except Exception:
+                break
+
+        start_server(
+            State(),
+            port=3000,
+            host="0.0.0.0",
+            open_browser=False,
+            in_debug_mode=False,
+            framed=False,
+            use_reloader=False
+        )
