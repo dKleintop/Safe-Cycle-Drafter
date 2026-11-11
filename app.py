@@ -6930,8 +6930,11 @@ def pick_preset_newark(state: State) -> Page:
 # --- Server Startup ---
 if __name__ == "__main__":
     import os
-    if os.environ.get("DRAFTER_SKIP", "").lower() in ("true", "1", "yes") or os.environ.get("CI", "").lower() in ("true", "1", "yes"):
+    import sys
+    if os.environ.get("DRAFTER_SKIP", "").lower() in ("true", "1", "yes"):
         pass
+    elif "--compile" in sys.argv:
+        start_server(State())
     else:
         import socket
         import time
