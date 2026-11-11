@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+.python_packages/
+
+# Python cache & compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Build and distributions
+build/
+dist/
+coverage/
+
+# OS & Logs
+.DS_Store
+*.log
+tmp/
+
+# Test artifacts and screenshots
+screenshot_*.png
+.aistudio/
+
+# Environment variables
+.env*
+!.env.example

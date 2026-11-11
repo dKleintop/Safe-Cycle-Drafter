@@ -1,0 +1,14 @@
+[
+  {
+    "route_id": "route_default_1",
+    "name": "Hudson Greenway Protected Commute",
+    "start_label": "Central Park South, New York, NY",
+    "dest_label": "Brooklyn Bridge (Manhattan Side), NY",
+    "route_type": "Safest",
+    "distance_km": 8.6,
+    "duration_mins": 29.5,
+    "safety_score": 88.5,
+    "created_at": "2026-10-18 08:30",
+    "gpx_content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<gpx version=\"1.1\" creator=\"SafeCycle GPS\">\n  <trk>\n    <name>Hudson Greenway Protected Commute</name>\n    <trkseg>\n      <trkpt lat=\"40.7661\" lon=\"-73.9772\"><name>Start: Central Park South</name></trkpt>\n      <trkpt lat=\"40.7818\" lon=\"-73.9877\"><name>Hudson River Greenway</name></trkpt>\n      <trkpt lat=\"40.7126\" lon=\"-74.0048\"><name>End: Brooklyn Bridge</name></trkpt>\n    </trkseg>\n  </trk>\n</gpx>"
+  }
+]
