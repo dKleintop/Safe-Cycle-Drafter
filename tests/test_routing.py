@@ -185,5 +185,57 @@ class TestRoutingEngine(unittest.TestCase):
         self.assertEqual(start_fmt3, "5:00 PM")
         self.assertEqual(end_fmt3, "5:45 PM")
 
+
+class TestSavedRoutesPersistence(unittest.TestCase):
+    """Tests for Saved Routes persistence, duplicate prevention, and GPX export."""
+
+    def test_add_load_and_delete_saved_route(self):
+        from storage import (
+            add_saved_route, load_saved_routes, delete_saved_route,
+            is_route_saved, get_saved_route_by_id
+        )
+
+        test_gpx = "<gpx><trk><name>Test</name></trk></gpx>"
+        item = add_saved_route(
+            name="UD Campus to Newark Reservoir",
+            start_label="Newark, DE",
+            dest_label="Newark Reservoir, DE",
+            route_type="Safest",
+            distance_km=4.2,
+            duration_mins=16.0,
+            safety_score=89.0,
+            gpx_content=test_gpx
+        )
+
+        self.assertIsNotNone(item)
+        self.assertEqual(item.name, "UD Campus to Newark Reservoir")
+        self.assertTrue(is_route_saved("Newark, DE", "Newark Reservoir, DE", "Safest"))
+
+        # Verify lookup
+        fetched = get_saved_route_by_id(item.route_id)
+        self.assertIsNotNone(fetched)
+        self.assertEqual(fetched.name, "UD Campus to Newark Reservoir")
+
+        # Verify duplicate update
+        updated = add_saved_route(
+            name="UD Campus to Newark Reservoir (Updated)",
+            start_label="Newark, DE",
+            dest_label="Newark Reservoir, DE",
+            route_type="Safest",
+            distance_km=4.2,
+            duration_mins=15.5,
+            safety_score=91.0,
+            gpx_content=test_gpx
+        )
+        self.assertEqual(updated.route_id, item.route_id)
+        self.assertEqual(updated.name, "UD Campus to Newark Reservoir (Updated)")
+
+        # Verify delete
+        delete_saved_route(item.route_id)
+        self.assertIsNone(get_saved_route_by_id(item.route_id))
+        self.assertFalse(is_route_saved("Newark, DE", "Newark Reservoir, DE", "Safest"))
+
+
 if __name__ == '__main__':
     unittest.main()
+
