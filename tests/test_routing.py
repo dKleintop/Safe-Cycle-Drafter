@@ -235,7 +235,88 @@ class TestSavedRoutesPersistence(unittest.TestCase):
         self.assertIsNone(get_saved_route_by_id(item.route_id))
         self.assertFalse(is_route_saved("Newark, DE", "Newark Reservoir, DE", "Safest"))
 
+    def test_beta_mode_gates_saved_routes_and_keeps_gpx_export(self):
+        import os
+        from unittest.mock import patch
+        os.environ["DRAFTER_SKIP"] = "true"
+        import main
+
+        sample_seg = main.RoadSegment(
+            segment_id="seg_test_1",
+            name="Pomeroy Rail Trail",
+            coordinates=[main.Coordinate(39.676, -75.747), main.Coordinate(39.680, -75.742)],
+            length_km=1.2,
+            infrastructure="protected_bike_path",
+            speed_limit_mph=0,
+            traffic_exposure="very_low",
+            crash_record=None,
+            intersection_risk="low",
+            safety_score=95.0,
+            confidence="HIGH",
+            risk_category="LOWER_RISK",
+            positive_factors=["Protected greenway"],
+            negative_factors=[],
+            evidence_notes="Test corridor",
+            safer_alternative=""
+        )
+        sample_route = main.RouteOption(
+            route_type="Safest",
+            total_distance_km=1.2,
+            estimated_duration_mins=5.0,
+            overall_safety_score=95.0,
+            high_risk_segments_count=0,
+            bike_infrastructure_percentage=100.0,
+            major_intersections_count=0,
+            warnings=[],
+            segments=[sample_seg],
+            turn_instructions=[],
+            selection_rationale="Test safest route"
+        )
+        mock_routes = {"Safest": sample_route}
+
+        s = main.State()
+        self.assertFalse(s.beta_mode)
+
+        with patch("main.get_routes_from_state", return_value=mock_routes):
+            nav_off = str(main.render_navbar("planner", s.beta_mode, s))
+            self.assertNotIn("Saved Routes", nav_off)
+            self.assertNotIn("Save Route", nav_off)
+
+            res_off = str(main.route_results_page(s))
+            self.assertNotIn("Save Route to Favorites", res_off)
+            self.assertIn("Export GPX File", res_off)
+
+            det_off = str(main.segment_details_page(s))
+            self.assertNotIn("Save This Route to Favorites", det_off)
+            self.assertIn("Export GPX Track", det_off)
+
+            # Toggle Beta Mode ON
+            main.toggle_beta_mode(s)
+            self.assertTrue(s.beta_mode)
+
+            nav_on = str(main.render_navbar("planner", s.beta_mode, s))
+            self.assertIn("Saved Routes", nav_on)
+            self.assertIn("Save Route (Beta)", nav_on)
+
+            res_on = str(main.route_results_page(s))
+            self.assertIn("Save Route to Favorites (Beta)", res_on)
+            self.assertIn("Export GPX File", res_on)
+
+            det_on = str(main.segment_details_page(s))
+            self.assertIn("Save This Route to Favorites (Beta)", det_on)
+            self.assertIn("Export GPX Track", det_on)
+
+            # Accessing Saved Routes page works in Beta Mode
+            saved_pg = str(main.go_to_saved(s))
+            self.assertIn("Saved Bicycle Routes", saved_pg)
+
+            # Toggle Beta Mode back OFF while on Saved Routes returns to results
+            res_after = str(main.toggle_beta_mode(s))
+            self.assertFalse(s.beta_mode)
+            self.assertIn("Route Options Comparison", res_after)
+
 
 if __name__ == '__main__':
     unittest.main()
+
 

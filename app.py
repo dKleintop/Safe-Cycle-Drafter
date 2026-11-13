@@ -4086,15 +4086,14 @@ def render_navbar(active_page: str, beta_mode: bool = False, state: Optional[Sta
     ]
     if beta_mode:
         nav_buttons.append(Button("🧭 Live GPS Navigation (Beta)", go_to_navigation))
-    
-    saved_label = f"💾 Saved Routes ({saved_count})" if saved_count > 0 else "💾 Saved Routes"
-    nav_buttons.append(Button(saved_label, go_to_saved))
+        saved_label = f"💾 Saved Routes ({saved_count}) (Beta)" if saved_count > 0 else "💾 Saved Routes (Beta)"
+        nav_buttons.append(Button(saved_label, go_to_saved))
 
-    # Prominent Quick-Save Route action when an active planned route exists in state
-    if state is not None and getattr(state, "start_address", None) and getattr(state, "dest_address", None):
-        nav_buttons.append(
-            Button("⭐ Save Route", handle_save_current_route, style="background: #047857; color: white; border: none; padding: 6px 14px; border-radius: 6px; font-weight: 700; box-shadow: 0 2px 4px rgba(4,120,87,0.25); cursor: pointer;")
-        )
+        # Prominent Quick-Save Route action when an active planned route exists in state (Beta)
+        if state is not None and getattr(state, "start_address", None) and getattr(state, "dest_address", None):
+            nav_buttons.append(
+                Button("⭐ Save Route (Beta)", handle_save_current_route, style="background: #047857; color: white; border: none; padding: 6px 14px; border-radius: 6px; font-weight: 700; box-shadow: 0 2px 4px rgba(4,120,87,0.25); cursor: pointer;")
+            )
 
     nav_buttons.append(Button("ℹ️ About Safety Score", go_to_about))
 
@@ -4104,13 +4103,13 @@ def render_navbar(active_page: str, beta_mode: bool = False, state: Optional[Sta
     ])
 
 def render_beta_corner_toggle(state: State) -> Component:
-    """Corner toggle button for experimental features (Live GPS Navigation & Benchmark Corridors)."""
+    """Corner toggle button for experimental features (Live GPS Navigation, Saved Routes & Benchmark Corridors)."""
     is_on = state.beta_mode
     status_label = "🧪 Beta Mode: ON" if is_on else "🧪 Beta Mode: OFF"
     btn_bg = "#047857" if is_on else "#ffffff"
     btn_color = "#ffffff" if is_on else "#475569"
     btn_border = "1.5px solid #059669" if is_on else "1.5px solid #cbd5e1"
-    hint_text = "Beta features active (Live GPS Navigation & Benchmark Corridors)" if is_on else "Enable experimental features (Live GPS & Benchmarks)"
+    hint_text = "Beta features active (Live GPS Navigation, Saved Routes & Benchmarks)" if is_on else "Enable experimental features (Live GPS, Saved Routes & Benchmarks)"
 
     return Div([
         Div([
@@ -6347,7 +6346,7 @@ def route_results_page(state: State) -> Page:
                 *w_block,
                 Row([
                     *([Button("🚴 Start Live GPS Navigation (Beta)", start_route_navigation, Argument("route_type", r_type), style="background: #047857; color: white; padding: 10px 18px; font-weight: 700; border-radius: 6px;")] if state.beta_mode else []),
-                    Button("💾 Save Route to Favorites", save_specific_route, Argument("route_type", r_type), style="background: #0284c7; color: white; padding: 10px 18px; font-weight: 600; border-radius: 6px;"),
+                    *([Button("💾 Save Route to Favorites (Beta)", save_specific_route, Argument("route_type", r_type), style="background: #0284c7; color: white; padding: 10px 18px; font-weight: 600; border-radius: 6px;")] if state.beta_mode else []),
                     Button("📥 Export GPX File", export_specific_gpx, Argument("route_type", r_type), style="background: #475569; color: white; padding: 10px 18px; font-weight: 600; border-radius: 6px;"),
                     Button("🔄 Change Route Settings", go_to_planner, style="background: #f1f5f9; color: #1e293b; padding: 10px 18px; font-weight: 600; border-radius: 6px; border: 1px solid #cbd5e1;")
                 ], style="gap: 10px; flex-wrap: wrap; margin-bottom: 10px;")
@@ -6487,7 +6486,7 @@ def segment_details_page(state: State) -> Page:
         Div([
             Row([
                 Button("⬅️ Back to Route Results", go_to_results, style="background: #f1f5f9; color: #1e293b; padding: 7px 16px; border: 1px solid #cbd5e1; border-radius: 8px; font-weight: 600; cursor: pointer;"),
-                Button("⭐ Save This Route to Favorites", handle_save_current_route, style="background: #047857; color: white; padding: 7px 18px; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 5px rgba(4,120,87,0.25);"),
+                *([Button("⭐ Save This Route to Favorites (Beta)", handle_save_current_route, style="background: #047857; color: white; padding: 7px 18px; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 5px rgba(4,120,87,0.25);")] if state.beta_mode else []),
                 Button("📥 Export GPX Track", handle_export_gpx, style="background: #0284c7; color: white; padding: 7px 16px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;")
             ], style="gap: 10px; margin-bottom: 14px; flex-wrap: wrap; align-items: center;")
         ]),
@@ -6987,7 +6986,7 @@ def go_to_navigation(state: State) -> Page:
 def toggle_beta_mode(state: State) -> Page:
     state.beta_mode = not state.beta_mode
     if state.beta_mode:
-        state.notification = "🧪 Beta Mode enabled! Live GPS Navigation and Benchmark Corridors are now visible."
+        state.notification = "🧪 Beta Mode enabled! Live GPS Navigation, Saved Routes, and Benchmark Corridors are now visible."
     else:
         state.notification = "🧪 Beta Mode disabled. Switched back to standard SafeCycle mode."
     
@@ -7000,6 +6999,8 @@ def toggle_beta_mode(state: State) -> Page:
             return route_results_page(state)
         return navigation_page(state)
     elif state.current_page == "saved":
+        if not state.beta_mode:
+            return route_results_page(state)
         return saved_routes_page(state)
     elif state.current_page == "about":
         return about_page(state)
@@ -7007,6 +7008,9 @@ def toggle_beta_mode(state: State) -> Page:
 
 @route
 def go_to_saved(state: State) -> Page:
+    if not state.beta_mode:
+        state.notification = "Saved Routes is currently in Beta. Enable Beta Mode in the bottom corner toggle to access it."
+        return route_results_page(state)
     return saved_routes_page(state)
 
 @route
