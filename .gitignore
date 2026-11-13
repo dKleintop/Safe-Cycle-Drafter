@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 .python_packages/
+.venv/
 
 # Python cache & compiled files
 __pycache__/
@@ -9,11 +10,21 @@ __pycache__/
 *.pyd
 .pytest_cache/
 
-# Build and distributions
+# Build and distributions (generated on GitHub Actions deploy)
 build/
 dist/
 _site/
 coverage/
+index.html
+__drafter_assets/
+
+# Local preview runner / non-Python template artifacts
+package.json
+package-lock.json
+bun.lock
+tsconfig.json
+vite.config.ts
+src/
 
 # OS & Logs
 .DS_Store

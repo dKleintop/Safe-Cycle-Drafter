@@ -1,19 +1,15 @@
-<<<<<<< HEAD
-# drafter-deployment-template-v1
-Your first Drafter website!
-=======
 # SafeCycle — A Safety-First Bike GPS and Route Planner
 
 > **"Safety first. Distance and travel time second."**
 
-SafeCycle is a bicycle GPS navigation and route-planning web application built with **Python Drafter**. Rather than directing cyclists down high-speed, dangerous multi-lane arterials simply because they are the shortest or fastest, SafeCycle prioritizes dedicated bicycle infrastructure (protected bike lanes, off-street greenway trails, traffic-calmed neighborhood greenways), lower motor vehicle speeds, and verified collision histories.
+SafeCycle is a bicycle GPS navigation and route-planning web application built 100% in **Python** using **Python Drafter**. Rather than directing cyclists down high-speed, dangerous multi-lane arterials simply because they are the shortest or fastest, SafeCycle prioritizes dedicated bicycle infrastructure (protected bike lanes, off-street greenway trails, traffic-calmed neighborhood greenways), lower motor vehicle speeds, and verified collision histories.
 
 ---
 
-## 1. Non-Negotiable Architecture: Python Drafter
+## 1. Non-Negotiable Architecture: 100% Python Drafter
 
 SafeCycle is built purely using **Python Drafter** as the primary web framework:
-- **`app.py`**: Drafter application entrypoint, page routing, interactive state management, and Leaflet map integration via Drafter components (`Page`, `Header`, `Div`, `Row`, `Button`, `TextBox`, `SelectBox`, `RawHTML`).
+- **`main.py` / `app.py`**: Drafter application entrypoint, page routing, interactive state management, and Leaflet map integration via Drafter components (`Page`, `Header`, `Div`, `Row`, `Button`, `TextBox`, `SelectBox`, `RawHTML`).
 - **`models.py`**: Typed data structures (`Coordinate`, `RoadSegment`, `CrashRecord`, `TurnInstruction`, `RouteOption`, `SavedRouteItem`).
 - **`safety.py`**: Transparent 5-factor road safety scoring engine (0-100) with confidence levels (`HIGH`, `MEDIUM`, `LOW`, `INSUFFICIENT`) and positive/negative risk attribution.
 - **`routing.py`**: Graph-based multi-objective Dijkstra and heuristic routing engine with configurable safety cost penalties.
@@ -113,4 +109,3 @@ The test suite validates:
 - Direct mode identifies dangerous segments and provides warnings rather than hiding them.
 - All distances, cycling times, and safety scores use consistent units (km, minutes, 0-100 score).
 - Address geocoding and invalid coordinates fail gracefully with clear user guidance.
->>>>>>> 6aa5815 (feat: Delaware bike routing system with paved shoulders and multi-route discovery)
