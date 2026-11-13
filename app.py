@@ -4102,8 +4102,12 @@ def render_navbar(active_page: str, beta_mode: bool = False, state: Optional[Sta
         Row(nav_buttons, style="gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;")
     ])
 
+SHOW_BETA_TOGGLE = False
+
 def render_beta_corner_toggle(state: State) -> Component:
     """Corner toggle button for experimental features (Live GPS Navigation, Saved Routes & Benchmark Corridors)."""
+    if not SHOW_BETA_TOGGLE:
+        return Div([])
     is_on = state.beta_mode
     status_label = "🧪 Beta Mode: ON" if is_on else "🧪 Beta Mode: OFF"
     btn_bg = "#047857" if is_on else "#ffffff"
@@ -6130,11 +6134,12 @@ def route_results_page(state: State) -> Page:
 
     beta_timing_note = ""
     if not state.beta_mode:
-        beta_timing_note = """
-        <div style="font-size: 0.76rem; color: #64748b; margin-top: 6px; display: flex; align-items: center; gap: 4px;">
-            <span>💡 <em>To dynamically adjust departure schedule or speed after route generation, enable <strong>Beta Mode</strong>.</em></span>
-        </div>
-        """
+        if SHOW_BETA_TOGGLE:
+            beta_timing_note = """
+            <div style="font-size: 0.76rem; color: #64748b; margin-top: 6px; display: flex; align-items: center; gap: 4px;">
+                <span>💡 <em>To dynamically adjust departure schedule or speed after route generation, enable <strong>Beta Mode</strong>.</em></span>
+            </div>
+            """
     else:
         beta_timing_note = """
         <div style="font-size: 0.76rem; color: #047857; margin-top: 6px; font-weight: 600; display: flex; align-items: center; gap: 4px;">

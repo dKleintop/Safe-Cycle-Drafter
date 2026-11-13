@@ -284,10 +284,12 @@ class TestSavedRoutesPersistence(unittest.TestCase):
 
             res_off = str(main.route_results_page(s))
             self.assertNotIn("Save Route to Favorites", res_off)
+            self.assertNotIn("Beta Mode:", res_off)
             self.assertIn("Export GPX File", res_off)
 
             det_off = str(main.segment_details_page(s))
             self.assertNotIn("Save This Route to Favorites", det_off)
+            self.assertNotIn("Beta Mode:", det_off)
             self.assertIn("Export GPX Track", det_off)
 
             # Toggle Beta Mode ON
