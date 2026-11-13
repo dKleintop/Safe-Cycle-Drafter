@@ -8025,6 +8025,39 @@ def about_page(state: State) -> Page:
     vz_meta = DATA_SOURCES_METADATA["vision_zero"]
     tc_meta = DATA_SOURCES_METADATA["traffic_counts"]
 
+    beta_hazard_block = Div([
+        Header(
+            "🧪 Beta Mode: Report a Road Hazard or Incorrect Classification",
+            level=3,
+            style="color: #064e3b; margin-top: 16px;",
+        ),
+        Paragraph(
+            "Encountered a missing bike lane, pothole, dangerous dooring zone, or close pass? "
+            "Submit a report below to adjust community safety confidence:",
+            style="font-size: 0.85rem; color: #64748b;",
+        ),
+        Row([
+            Div([
+                Label("Road Name / Intersection:", "hazard_road"),
+                TextBox("hazard_road", "5th Ave & 34th St")
+            ], style="flex: 1;"),
+            Div([
+                Label("Hazard Description:", "hazard_issue"),
+                TextBox("hazard_issue", "Frequent delivery vehicle double-parking in bike path")
+            ], style="flex: 2;"),
+            Div([
+                Label("&nbsp;", "submit_label"),
+                Button(
+                    "⚠️ Submit Safety Report",
+                    handle_submit_hazard,
+                    style="background: #dc2626; color: white; padding: 8px 16px; "
+                    "border-radius: 6px; font-weight: 600;",
+                )
+            ], style="flex: 1; margin-top: 4px;")
+        ], style="gap: 12px; align-items: flex-end;"),
+        RawHTML(reports_html),
+    ])
+
     return Page(state, [
         render_navbar("about", state.beta_mode, state),
         *notification_block,
@@ -8122,37 +8155,7 @@ def about_page(state: State) -> Page:
                 </ul>
                 """)
             ]),
-
-            Header(
-                "Report a Road Hazard or Incorrect Classification",
-                level=3,
-                style="color: #064e3b; margin-top: 16px;",
-            ),
-            Paragraph(
-                "Encountered a missing bike lane, pothole, dangerous dooring zone, or close pass? "
-                "Submit a report below to adjust community safety confidence:",
-                style="font-size: 0.85rem; color: #64748b;",
-            ),
-            Row([
-                Div([
-                    Label("Road Name / Intersection:", "hazard_road"),
-                    TextBox("hazard_road", "5th Ave & 34th St")
-                ], style="flex: 1;"),
-                Div([
-                    Label("Hazard Description:", "hazard_issue"),
-                    TextBox("hazard_issue", "Frequent delivery vehicle double-parking in bike path")
-                ], style="flex: 2;"),
-                Div([
-                    Label("&nbsp;", "submit_label"),
-                    Button(
-                        "⚠️ Submit Safety Report",
-                        handle_submit_hazard,
-                        style="background: #dc2626; color: white; padding: 8px 16px; "
-                        "border-radius: 6px; font-weight: 600;",
-                    )
-                ], style="flex: 1; margin-top: 4px;")
-            ], style="gap: 12px; align-items: flex-end;"),
-            RawHTML(reports_html)
+            *([beta_hazard_block] if state.beta_mode else []),
         ], class_name="card"),
         render_beta_corner_toggle(state)
     ])
@@ -8410,8 +8413,13 @@ def delete_saved_route_handler(state: State, route_id: str = "") -> Page:
 
 @route
 def handle_submit_hazard(state: State, hazard_road: str = "", hazard_issue: str = "") -> Page:
-    """Append a new HazardReport dataclass instance to state.reported_hazards."""
+    """Append a new HazardReport dataclass instance to state.reported_hazards in Beta Mode."""
     import time
+    if not state.beta_mode:
+        state.notification = (
+            "Hazard reporting is currently in Beta. Enable Beta Mode to submit reports."
+        )
+        return about_page(state)
     if hazard_road and hazard_issue:
         state.reported_hazards.append(
             HazardReport(
@@ -8455,7 +8463,7 @@ def toggle_beta_mode(state: State) -> Page:
     if state.beta_mode:
         state.notification = (
             "🧪 Beta Mode enabled! Live GPS Navigation, Saved Routes, "
-            "and Benchmark Corridors are now visible."
+            "Benchmark Corridors, and Hazard Reporting are now visible."
         )
     else:
         state.notification = (
@@ -8706,6 +8714,9 @@ def run_bakery_unit_tests() -> None:
             assert_equal(type(about_page(st)), Page)
             assert_equal(type(toggle_beta_mode(st)), Page)
             assert_equal(st.beta_mode, False)
+            assert_equal("Report a Road Hazard" in str(about_page(st)), False)
+            assert_equal(type(handle_submit_hazard(st, "Main St", "Test")), Page)
+            assert_equal(len(st.reported_hazards), 1)
 
 
 # Run offline Bakery unit tests during compilation and coverage runs

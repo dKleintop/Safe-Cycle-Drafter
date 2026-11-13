@@ -170,7 +170,7 @@ class TestAllDrafterRoutes(unittest.TestCase):
             self.assertEqual(len(main.load_saved_routes()), initial_count + 1)
             main.saved_routes_page(st)
 
-            # HazardReport list modification and loop rendering on about_page
+            # HazardReport list modification and loop rendering on about_page (Beta Mode)
             about_pg = main.handle_submit_hazard(st, "Elkton Rd & Amstel Ave", "Missing curb cut")
             self.assertEqual(len(st.reported_hazards), 1)
             self.assertEqual(st.reported_hazards[0].road, "Elkton Rd & Amstel Ave")
@@ -179,9 +179,13 @@ class TestAllDrafterRoutes(unittest.TestCase):
             self.assertIn("Missing curb cut", about_html)
             self.assertEqual(main.about_page(st).__class__.__name__, "Page")
 
-            # Toggle Beta Mode back off
+            # Toggle Beta Mode back off and confirm hazard reporting is hidden & gated
             main.toggle_beta_mode(st)
             self.assertFalse(st.beta_mode)
+            about_standard_html = str(main.about_page(st))
+            self.assertNotIn("Report a Road Hazard", about_standard_html)
+            main.handle_submit_hazard(st, "Main St", "Ignored while Beta off")
+            self.assertEqual(len(st.reported_hazards), 1)
 
 
 if __name__ == "__main__":
