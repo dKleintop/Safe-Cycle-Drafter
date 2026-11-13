@@ -1,5 +1,5 @@
 """
-models.py - Core data structures for SafeCycle
+models.py - Core Python data structures for SafeCycle Drafter
 """
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
