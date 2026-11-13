@@ -4090,6 +4090,7 @@ class State:
 
     # Feature flags
     beta_mode: bool = False
+    dark_mode: bool = False
 
 
 def get_routes_from_state(state: State) -> Dict[str, RouteOption]:
@@ -4132,18 +4133,80 @@ def get_routes_from_state(state: State) -> Dict[str, RouteOption]:
 
 
 # --- CSS and Header Styling ---
-# Advanced technique: injecting Leaflet.js CDN headers via Drafter's add_website_header
-# enables interactive OpenStreetMap map rendering inside Python Drafter pages.
+# Advanced technique: injecting Leaflet.js CDN headers and a DOM MutationObserver
+# via Drafter's add_website_header enables interactive OpenStreetMap rendering,
+# dark mode class synchronization, and automatic GPX file download triggers.
 SCRIPT_OPEN = "<scr" + "ipt"
 SCRIPT_CLOSE = "</scr" + "ipt>"
 LEAFLET_SCRIPT = (
     f'{SCRIPT_OPEN} src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" '
     f'crossorigin="">{SCRIPT_CLOSE}'
 )
+THEME_AND_DOWNLOAD_SCRIPT = f"""{SCRIPT_OPEN}>
+(function() {{
+    function syncSafeCycleDom() {{
+        var root = document.documentElement;
+        var body = document.body;
+        var themeEl = document.querySelector("[data-safecycle-theme]");
+        if (themeEl) {{
+            var isDark = themeEl.getAttribute("data-safecycle-theme") === "dark";
+            if (root) root.classList.toggle("safecycle-dark", isDark);
+            if (body) body.classList.toggle("safecycle-dark", isDark);
+            try {{
+                localStorage.setItem("safecycle_dark_mode", isDark ? "true" : "false");
+            }} catch (e) {{}}
+        }}
+        var links = document.querySelectorAll('a[data-auto-gpx="true"]');
+        links.forEach(function(link) {{
+            var token = link.getAttribute("data-export-token") || link.getAttribute("href") || "1";
+            if (link.dataset.downloadedToken === token) return;
+            link.dataset.downloadedToken = token;
+            var fname = link.getAttribute("data-filename") || "safecycle_route.gpx";
+            var href = link.getAttribute("href") || "";
+            try {{
+                var commaIdx = href.indexOf(",");
+                if (commaIdx !== -1 && href.indexOf("data:") === 0) {{
+                    var rawGpx = decodeURIComponent(href.slice(commaIdx + 1));
+                    var blob = new Blob([rawGpx], {{ type: "application/gpx+xml;charset=utf-8" }});
+                    var objUrl = URL.createObjectURL(blob);
+                    var tmp = document.createElement("a");
+                    tmp.href = objUrl;
+                    tmp.download = fname;
+                    tmp.style.display = "none";
+                    if (body) {{
+                        body.appendChild(tmp);
+                        tmp.click();
+                        setTimeout(function() {{
+                            if (tmp.parentNode) tmp.parentNode.removeChild(tmp);
+                            URL.revokeObjectURL(objUrl);
+                        }}, 1500);
+                        return;
+                    }}
+                }}
+            }} catch (e) {{}}
+            try {{ link.click(); }} catch (e2) {{}}
+        }});
+    }}
+    window.safecycleSyncDom = syncSafeCycleDom;
+    if (document.readyState === "loading") {{
+        document.addEventListener("DOMContentLoaded", syncSafeCycleDom);
+    }} else {{
+        syncSafeCycleDom();
+    }}
+    if (window.MutationObserver && document.documentElement) {{
+        var observer = new MutationObserver(function() {{
+            syncSafeCycleDom();
+        }});
+        observer.observe(document.documentElement, {{ childList: true, subtree: true }});
+    }}
+    setTimeout(syncSafeCycleDom, 50);
+    setTimeout(syncSafeCycleDom, 250);
+}})();
+{SCRIPT_CLOSE}"""
 add_website_header(
     '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
     '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" '
-    'crossorigin=""/>' + LEAFLET_SCRIPT
+    'crossorigin=""/>' + LEAFLET_SCRIPT + THEME_AND_DOWNLOAD_SCRIPT
 )
 set_website_title("SafeCycle — Safety-First Bike GPS and Route Planner")
 
@@ -4548,6 +4611,256 @@ body {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
 }
+
+/* --- SafeCycle Dark Mode Theme --- */
+html.safecycle-dark,
+body.safecycle-dark {
+    background-color: #0b1120 !important;
+    color: #e2e8f0 !important;
+}
+body.safecycle-dark .safecycle-navbar {
+    background: #022c22;
+    border: 1px solid #065f46;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+body.safecycle-dark .card {
+    background: #111827 !important;
+    border-color: #334155 !important;
+    color: #e2e8f0 !important;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+body.safecycle-dark .card h1,
+body.safecycle-dark .card h2,
+body.safecycle-dark .card h3,
+body.safecycle-dark .card h4 {
+    color: #6ee7b7 !important;
+}
+body.safecycle-dark input,
+body.safecycle-dark select,
+body.safecycle-dark textarea,
+body.safecycle-dark .safecycle-quick-select {
+    background: #0f172a !important;
+    color: #f8fafc !important;
+    border: 1px solid #334155 !important;
+}
+body.safecycle-dark input:focus,
+body.safecycle-dark select:focus,
+body.safecycle-dark textarea:focus {
+    border-color: #10b981 !important;
+    outline: none;
+}
+body.safecycle-dark label {
+    color: #cbd5e1 !important;
+}
+body.safecycle-dark .notification-banner {
+    background: #064e3b;
+    border-left-color: #34d399;
+    color: #ecfdf5;
+}
+body.safecycle-dark .warning-box {
+    background: #431407;
+    border-left-color: #fb923c;
+    color: #fed7aa;
+}
+body.safecycle-dark .legend-bar,
+body.safecycle-dark .stat-pill {
+    background: #1e293b !important;
+    border-color: #334155 !important;
+    color: #cbd5e1 !important;
+}
+body.safecycle-dark .stat-value {
+    color: #34d399;
+}
+body.safecycle-dark .stat-label {
+    color: #94a3b8;
+}
+body.safecycle-dark .strava-deck-header {
+    border-bottom-color: #334155;
+}
+body.safecycle-dark .strava-deck-title {
+    color: #f8fafc !important;
+}
+body.safecycle-dark .strava-card {
+    background: #111827 !important;
+    border-color: #334155 !important;
+    color: #e2e8f0 !important;
+}
+body.safecycle-dark .strava-card.active {
+    background: linear-gradient(180deg, #064e3b 0%, #111827 120px) !important;
+    border-color: #10b981 !important;
+}
+body.safecycle-dark .strava-tag-badge,
+body.safecycle-dark .strava-stat-val {
+    color: #f8fafc !important;
+}
+body.safecycle-dark .strava-stat-unit,
+body.safecycle-dark .strava-stat-sub,
+body.safecycle-dark .strava-stat-lbl,
+body.safecycle-dark .strava-spectrum-legend,
+body.safecycle-dark .strava-features-list {
+    color: #cbd5e1 !important;
+}
+body.safecycle-dark .strava-stats-matrix,
+body.safecycle-dark .strava-sparkline-wrap {
+    background: #0f172a !important;
+    border-color: #334155 !important;
+}
+body.safecycle-dark .strava-spectrum-bar {
+    background: #334155;
+}
+body.safecycle-dark .strava-pill-alt {
+    background: #1e293b !important;
+    color: #cbd5e1 !important;
+}
+body.safecycle-dark .safecycle-autocomplete-dropdown {
+    background: #111827;
+    border-color: #10b981;
+}
+body.safecycle-dark .safecycle-dropdown-item {
+    border-bottom-color: #1e293b;
+    color: #f1f5f9;
+}
+body.safecycle-dark .safecycle-dropdown-item:hover,
+body.safecycle-dark .safecycle-dropdown-item.is-selected {
+    background: #064e3b;
+}
+body.safecycle-dark .item-cat-badge {
+    background: #1e3a8a;
+    color: #bfdbfe;
+}
+body.safecycle-dark .safecycle-map-wrap,
+body.safecycle-dark #safecycle_planner_map_wrapper {
+    border-color: #334155 !important;
+    background: #0f172a !important;
+}
+body.safecycle-dark .safecycle-map-type-bar,
+body.safecycle-dark .safecycle-floating-legend {
+    background: rgba(15, 23, 42, 0.94) !important;
+    border-color: #334155 !important;
+    color: #e2e8f0 !important;
+}
+body.safecycle-dark .safecycle-layer-btn.is-inactive {
+    color: #cbd5e1;
+}
+body.safecycle-dark .safecycle-layer-btn.is-inactive:hover {
+    background: #1e293b;
+    color: #f8fafc;
+}
+body.safecycle-dark .badge-card.is-active {
+    background: #0f172a;
+    color: #f8fafc;
+    border-color: #60a5fa;
+}
+body.safecycle-dark .badge-card.is-alt {
+    background: rgba(15, 23, 42, 0.94);
+    border-color: #475569;
+    color: #e2e8f0;
+}
+body.safecycle-dark .badge-dist {
+    color: #94a3b8;
+}
+body.safecycle-dark .is-active .badge-dist {
+    color: #93c5fd;
+}
+body.safecycle-dark .leaflet-control-zoom a {
+    background: #1e293b !important;
+    color: #f1f5f9 !important;
+    border-color: #334155 !important;
+}
+body.safecycle-dark .leaflet-popup-content-wrapper,
+body.safecycle-dark .leaflet-popup-tip {
+    background: #1e293b;
+    color: #f8fafc;
+}
+body.safecycle-dark #safecycle_planner_map_wrapper:not(.is-satellite) .leaflet-tile-pane,
+body.safecycle-dark #safecycle_leaflet_route_wrapper:not(.is-satellite) .leaflet-tile-pane {
+    filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(92%);
+}
+body.safecycle-dark [style*="background: #ffffff"],
+body.safecycle-dark [style*="background: #f8fafc"],
+body.safecycle-dark [style*="background: #f1f5f9"],
+body.safecycle-dark [style*="background: #fafafa"] {
+    background: #1e293b !important;
+    border-color: #334155 !important;
+    color: #e2e8f0 !important;
+}
+body.safecycle-dark [style*="background: #f0fdf4"],
+body.safecycle-dark [style*="background: #ecfdf5"] {
+    background: rgba(6, 95, 70, 0.28) !important;
+    border-color: #059669 !important;
+    color: #d1fae5 !important;
+}
+body.safecycle-dark [style*="background: #eff6ff"] {
+    background: rgba(30, 64, 175, 0.25) !important;
+    border-color: #3b82f6 !important;
+    color: #dbeafe !important;
+}
+body.safecycle-dark [style*="background: #faf5ff"],
+body.safecycle-dark [style*="background: #f5f3ff"] {
+    background: rgba(91, 33, 182, 0.25) !important;
+    border-color: #8b5cf6 !important;
+    color: #ede9fe !important;
+}
+body.safecycle-dark [style*="background: #fef2f2"],
+body.safecycle-dark [style*="background: #fff1f2"] {
+    background: rgba(153, 27, 27, 0.25) !important;
+    border-color: #ef4444 !important;
+    color: #fee2e2 !important;
+}
+body.safecycle-dark [style*="background: #fff7ed"],
+body.safecycle-dark [style*="background: #fffbeb"],
+body.safecycle-dark [style*="background: #fef3c7"] {
+    background: rgba(146, 64, 14, 0.28) !important;
+    border-color: #f59e0b !important;
+    color: #fef3c7 !important;
+}
+body.safecycle-dark [style*="color: #064e3b"],
+body.safecycle-dark [style*="color: #047857"],
+body.safecycle-dark [style*="color: #065f46"] {
+    color: #6ee7b7 !important;
+}
+body.safecycle-dark [style*="color: #0f172a"],
+body.safecycle-dark [style*="color: #1e293b"],
+body.safecycle-dark [style*="color: #334155"] {
+    color: #f1f5f9 !important;
+}
+body.safecycle-dark [style*="color: #475569"],
+body.safecycle-dark [style*="color: #64748b"] {
+    color: #94a3b8 !important;
+}
+body.safecycle-dark [style*="color: #15803d"],
+body.safecycle-dark [style*="color: #166534"] {
+    color: #86efac !important;
+}
+body.safecycle-dark [style*="color: #1d4ed8"],
+body.safecycle-dark [style*="color: #1e40af"],
+body.safecycle-dark [style*="color: #1e3a8a"] {
+    color: #93c5fd !important;
+}
+body.safecycle-dark [style*="color: #3730a3"],
+body.safecycle-dark [style*="color: #4338ca"],
+body.safecycle-dark [style*="color: #6d28d9"] {
+    color: #c4b5fd !important;
+}
+body.safecycle-dark [style*="color: #991b1b"],
+body.safecycle-dark [style*="color: #b91c1c"] {
+    color: #fca5a5 !important;
+}
+body.safecycle-dark [style*="color: #92400e"],
+body.safecycle-dark [style*="color: #c2410c"] {
+    color: #fcd34d !important;
+}
+body.safecycle-dark table th,
+body.safecycle-dark table td {
+    border-color: #334155 !important;
+    color: #e2e8f0;
+}
+body.safecycle-dark code {
+    background: #0f172a;
+    color: #34d399;
+    padding: 1px 5px;
+    border-radius: 4px;
+}
 """)
 
 set_website_title("SafeCycle — A Safety-First Bike GPS and Route Planner")
@@ -4570,12 +4883,15 @@ set_site_information(
 
 # --- Helper Navigation Component ---
 def render_navbar(active_page: str, beta_mode: bool = False, state: Optional[State] = None) -> Component:
-    """Build persistent header navbar across all SafeCycle pages with live saved count and quick-save action."""
+    """Build persistent header navbar across all SafeCycle pages with live saved count and theme toggle."""
     try:
         saved_count = len(load_saved_routes())
     except Exception:
         saved_count = 0
+    is_dark = bool(getattr(state, "dark_mode", False)) if state is not None else False
+    theme_mode = "dark" if is_dark else "light"
     html = f"""
+    <div id="safecycle_theme_sync" data-safecycle-theme="{theme_mode}" style="display: none;"></div>
     <div class="safecycle-navbar">
         <div class="safecycle-brand">
             🚲 SafeCycle
@@ -4607,6 +4923,15 @@ def render_navbar(active_page: str, beta_mode: bool = False, state: Optional[Sta
             )
 
     nav_buttons.append(Button("ℹ️ About Safety Score", go_to_about))
+    theme_label = "☀️ Light Mode" if is_dark else "🌙 Dark Mode"
+    theme_btn_style = (
+        "background: #1e293b; color: #f8fafc; border: 1px solid #475569; "
+        "padding: 6px 12px; border-radius: 6px; font-weight: 600; cursor: pointer;"
+        if is_dark else
+        "background: #0f172a; color: #f8fafc; border: 1px solid #334155; "
+        "padding: 6px 12px; border-radius: 6px; font-weight: 600; cursor: pointer;"
+    )
+    nav_buttons.append(Button(theme_label, toggle_dark_mode, style=theme_btn_style))
 
     return Div([
         RawHTML(html),
@@ -5610,6 +5935,8 @@ def render_leaflet_planner_map(
                 try {{ localStorage.setItem("safecycle_map_mode", mode); }} catch(e) {{}}
                 const btnStr = document.getElementById("planner_btn_streets");
                 const btnSat = document.getElementById("planner_btn_satellite");
+                const wrapEl = document.getElementById("safecycle_planner_map_wrapper");
+                if (wrapEl) wrapEl.classList.toggle("is-satellite", mode === "satellite");
 
                 if (mode === "satellite") {{
                     if (map.hasLayer(streetLayer)) map.removeLayer(streetLayer);
@@ -6012,10 +6339,14 @@ def render_leaflet_route_map(
                 {{ maxZoom: 19 }}
             );
 
+            if (window.safecycleSyncDom) window.safecycleSyncDom();
+
             function applyMapLayer(mode) {{
                 try {{ localStorage.setItem("safecycle_map_mode", mode); }} catch(e) {{}}
                 const btnStr = document.getElementById("route_btn_streets");
                 const btnSat = document.getElementById("route_btn_satellite");
+                const wrapEl = document.getElementById("safecycle_leaflet_route_wrapper");
+                if (wrapEl) wrapEl.classList.toggle("is-satellite", mode === "satellite");
 
                 if (mode === "satellite") {{
                     if (map.hasLayer(streetLayer)) map.removeLayer(streetLayer);
@@ -6188,6 +6519,7 @@ def render_leaflet_route_map(
                 }}
 
                 // 5. Update Strava & Possible Route Cards & Buttons
+                const isDarkMode = document.documentElement.classList.contains("safecycle-dark");
                 Object.keys(routesData).forEach(rType => {{
                     const safeId = rType.replace(/[^a-zA-Z0-9_]/g, "_");
                     const card = document.getElementById("strava_card_" + safeId);
@@ -6206,7 +6538,9 @@ def render_leaflet_route_map(
                                 : "0 8px 24px rgba(252, 82, 0, 0.15)";
                         }} else {{
                             card.classList.remove("active");
-                            card.style.borderColor = isPoss ? "#cbd5e1" : "#e2e8f0";
+                            card.style.borderColor = isDarkMode
+                                ? "#334155"
+                                : (isPoss ? "#cbd5e1" : "#e2e8f0");
                             card.style.boxShadow = "0 2px 6px rgba(0,0,0,0.04)";
                         }}
                     }}
@@ -6218,7 +6552,7 @@ def render_leaflet_route_map(
                         }} else {{
                             pill.className = "strava-pill-alt";
                             pill.innerText = isPoss ? "POSSIBLE OPTION" : "ALTERNATIVE";
-                            if (isPoss) pill.style.background = "#f1f5f9";
+                            if (isPoss) pill.style.background = isDarkMode ? "#1e293b" : "#f1f5f9";
                         }}
                     }}
                     if (btn) {{
@@ -6230,9 +6564,13 @@ def render_leaflet_route_map(
                                 ? "✓ Active on Map (Viewing Details)"
                                 : "✓ Active Route (Selected on Map)";
                         }} else {{
-                            btn.style.background = "#ffffff";
-                            btn.style.color = isPoss ? "#4338ca" : "#1e293b";
-                            btn.style.border = isPoss ? "1.5px solid #c7d2fe" : "2px solid #cbd5e1";
+                            btn.style.background = isDarkMode ? "#1e293b" : "#ffffff";
+                            btn.style.color = isDarkMode
+                                ? (isPoss ? "#c4b5fd" : "#f1f5f9")
+                                : (isPoss ? "#4338ca" : "#1e293b");
+                            btn.style.border = isDarkMode
+                                ? "1.5px solid #475569"
+                                : (isPoss ? "1.5px solid #c7d2fe" : "2px solid #cbd5e1");
                             btn.innerText = isPoss ? "View Details & Select Route ➔" : ("Select " + rType + " Route ➔");
                         }}
                     }}
@@ -7709,6 +8047,11 @@ def segment_details_page(state: State) -> Page:
     </div>
     """
 
+    notification_block = []
+    if state.notification:
+        notification_block.append(RawHTML(f'<div class="notification-banner">ℹ️ {state.notification}</div>'))
+        state.notification = ""
+
     fav_btn_style = (
         "background: #047857; color: white; padding: 7px 18px; border: none; "
         "border-radius: 8px; font-weight: 700; cursor: pointer; "
@@ -7716,6 +8059,7 @@ def segment_details_page(state: State) -> Page:
     )
     return Page(state, [
         render_navbar("details", state.beta_mode, state),
+        *notification_block,
         Div([
             Row([
                 Button(
@@ -7752,6 +8096,10 @@ def segment_details_page(state: State) -> Page:
 def navigation_page(state: State) -> Page:
     """Live GPS navigation page: High-contrast, turn-by-turn guidance, upcoming safety warnings."""
     state.current_page = "navigation"
+    notification_block = []
+    if state.notification:
+        notification_block.append(RawHTML(f'<div class="notification-banner">ℹ️ {state.notification}</div>'))
+        state.notification = ""
     routes = get_routes_from_state(state)
     active_route = routes.get(state.active_route_type, list(routes.values())[0])
 
@@ -7848,6 +8196,7 @@ def navigation_page(state: State) -> Page:
 
     return Page(state, [
         render_navbar("navigation", state.beta_mode, state),
+        *notification_block,
         RawHTML(disclaimer),
         RawHTML(warning_banner),
         RawHTML(nav_card_html),
@@ -8340,20 +8689,33 @@ def handle_save_current_route(state: State, custom_name: str = "") -> Page:
     )
     return saved_routes_page(state)
 
+def build_gpx_autodownload_html(prefix: str, gpx_content: str, file_name: str) -> str:
+    """Build notification HTML with auto-download trigger metadata and fallback GPX link."""
+    import time
+    encoded_gpx = urllib.parse.quote(gpx_content)
+    export_token = f"{file_name}_{int(time.time() * 1000)}_{len(gpx_content)}"
+    return (
+        f"{prefix} "
+        f'<a id="safecycle_gpx_download_link" data-auto-gpx="true" '
+        f'data-filename="{file_name}" data-export-token="{export_token}" '
+        f'href="data:application/gpx+xml;charset=utf-8,{encoded_gpx}" '
+        f'download="{file_name}" style="background: #047857; color: white; '
+        "padding: 4px 10px; border-radius: 6px; font-weight: 700; "
+        'text-decoration: none; display: inline-block; margin-left: 8px;">'
+        f"📥 Download {file_name} Again</a>"
+    )
+
 @route
 def handle_export_gpx(state: State) -> Page:
-    """Generate a GPX 1.1 data-URI download banner for the active route."""
+    """Generate a GPX 1.1 export that automatically downloads when ready."""
     routes = get_routes_from_state(state)
     active_route = routes.get(state.active_route_type, list(routes.values())[0])
     gpx = export_route_to_gpx(active_route, state.start_address, state.dest_address)
-    encoded_gpx = urllib.parse.quote(gpx)
     clean_file_name = f"safecycle_{active_route.route_type.lower()}_route.gpx"
-    state.notification = (
-        "GPX export ready! "
-        f"<a href='data:application/gpx+xml;charset=utf-8,{encoded_gpx}' "
-        f"download='{clean_file_name}' style='background: #047857; color: white; "
-        "padding: 4px 10px; border-radius: 6px; font-weight: 700; "
-        f"text-decoration: none; margin-left: 8px;'>📥 Click to Download {clean_file_name}</a>"
+    state.notification = build_gpx_autodownload_html(
+        "GPX export ready — downloading automatically!",
+        gpx,
+        clean_file_name,
     )
     return route_results_page(state)
 
@@ -8380,23 +8742,19 @@ def load_saved_route(state: State, route_id: str = "") -> Page:
 
 @route
 def export_saved_route(state: State, route_id: str = "") -> Page:
-    """Prepare a one-click GPX download link for a specific saved route."""
+    """Prepare a GPX export for a saved route that automatically downloads when ready."""
     if not route_id:
         return saved_routes_page(state)
     saved_items = load_saved_routes()
     for saved_item in saved_items:
         if saved_item.route_id == route_id:
-            encoded_gpx = urllib.parse.quote(saved_item.gpx_content)
             clean_file_name = (
                 re.sub(r"[^a-zA-Z0-9_\-]", "_", saved_item.name.lower()) + ".gpx"
             )
-            state.notification = (
-                f"GPX track ready for '{saved_item.name}'! "
-                f"<a href='data:application/gpx+xml;charset=utf-8,{encoded_gpx}' "
-                f"download='{clean_file_name}' style='background: #047857; "
-                "color: white; padding: 5px 12px; border-radius: 6px; "
-                "font-weight: 700; text-decoration: none; display: inline-block; "
-                f"margin-left: 8px;'>📥 Download {clean_file_name}</a>"
+            state.notification = build_gpx_autodownload_html(
+                f"GPX track ready for '{saved_item.name}' — downloading automatically!",
+                saved_item.gpx_content,
+                clean_file_name,
             )
             return saved_routes_page(state)
     return saved_routes_page(state)
@@ -8469,6 +8827,31 @@ def toggle_beta_mode(state: State) -> Page:
         state.notification = (
             "🧪 Beta Mode disabled. Switched back to standard SafeCycle mode."
         )
+
+    if state.current_page == "results":
+        return route_results_page(state)
+    elif state.current_page == "details":
+        return segment_details_page(state)
+    elif state.current_page == "navigation":
+        if not state.beta_mode:
+            return route_results_page(state)
+        return navigation_page(state)
+    elif state.current_page == "saved":
+        if not state.beta_mode:
+            return route_results_page(state)
+        return saved_routes_page(state)
+    elif state.current_page == "about":
+        return about_page(state)
+    return index(state)
+
+@route
+def toggle_dark_mode(state: State) -> Page:
+    """Toggle Dark Mode theme flag in State and re-render the current page."""
+    state.dark_mode = not state.dark_mode
+    if state.dark_mode:
+        state.notification = "🌙 Dark Mode enabled."
+    else:
+        state.notification = "☀️ Light Mode enabled."
 
     if state.current_page == "results":
         return route_results_page(state)
@@ -8702,11 +9085,18 @@ def run_bakery_unit_tests() -> None:
             assert_equal(type(load_saved_route(st, test_id)), Page)
             assert_equal(type(delete_saved_route_handler(st, test_id)), Page)
 
-            # Planner, results, about & hazard reporting
+            # Planner, results, about & hazard reporting + dark mode toggle
             assert_equal(type(go_to_planner(st)), Page)
             assert_equal(st.current_page, "planner")
+            assert_equal(type(toggle_dark_mode(st)), Page)
+            assert_equal(st.dark_mode, True)
+            assert_equal('data-safecycle-theme="dark"' in str(index(st)), True)
+            assert_equal(type(toggle_dark_mode(st)), Page)
+            assert_equal(st.dark_mode, False)
             assert_equal(type(go_to_results(st)), Page)
             assert_equal(st.current_page, "results")
+            gpx_pg_html = str(handle_export_gpx(st))
+            assert_equal('data-auto-gpx="true"' in gpx_pg_html, True)
             assert_equal(type(go_to_about(st)), Page)
             assert_equal(st.current_page, "about")
             assert_equal(type(handle_submit_hazard(st, "Main St", "Blocked bike lane")), Page)

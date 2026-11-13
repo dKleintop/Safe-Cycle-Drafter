@@ -114,9 +114,20 @@ class TestAllDrafterRoutes(unittest.TestCase):
 
             self.assertEqual(main.segment_details_page(st).__class__.__name__, "Page")
 
-            main.handle_export_gpx(st)
+            export_pg_html = str(main.handle_export_gpx(st))
+            self.assertIn('data-auto-gpx="true"', export_pg_html)
+            self.assertIn("safecycle_safest_route.gpx", export_pg_html)
             main.export_specific_gpx(st, "Direct")
             self.assertEqual(st.active_route_type, "Direct")
+
+            # Dark mode toggle preserves current page and toggles theme marker
+            dark_pg_html = str(main.toggle_dark_mode(st))
+            self.assertTrue(st.dark_mode)
+            self.assertIn('data-safecycle-theme="dark"', dark_pg_html)
+            self.assertEqual(st.current_page, "results")
+            light_pg_html = str(main.toggle_dark_mode(st))
+            self.assertFalse(st.dark_mode)
+            self.assertIn('data-safecycle-theme="light"', light_pg_html)
 
     def test_navigation_beta_saved_routes_and_hazard_loop(self) -> None:
         """Test Beta gating, navigation stepping, saved route CRUD, and HazardReport list loop."""
@@ -162,7 +173,8 @@ class TestAllDrafterRoutes(unittest.TestCase):
             self.assertEqual(len(saved_list), initial_count + 2)
 
             rid = saved_list[-1].route_id
-            main.export_saved_route(st, rid)
+            saved_export_html = str(main.export_saved_route(st, rid))
+            self.assertIn('data-auto-gpx="true"', saved_export_html)
             main.load_saved_route(st, rid)
             self.assertEqual(st.current_page, "results")
 
@@ -178,6 +190,13 @@ class TestAllDrafterRoutes(unittest.TestCase):
             self.assertIn("Elkton Rd & Amstel Ave", about_html)
             self.assertIn("Missing curb cut", about_html)
             self.assertEqual(main.about_page(st).__class__.__name__, "Page")
+
+            # Dark mode toggle on about page
+            about_dark_html = str(main.toggle_dark_mode(st))
+            self.assertTrue(st.dark_mode)
+            self.assertIn('data-safecycle-theme="dark"', about_dark_html)
+            main.toggle_dark_mode(st)
+            self.assertFalse(st.dark_mode)
 
             # Toggle Beta Mode back off and confirm hazard reporting is hidden & gated
             main.toggle_beta_mode(st)
