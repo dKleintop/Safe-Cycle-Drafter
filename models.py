@@ -6,14 +6,29 @@ from typing import List, Optional, Dict, Any
 
 @dataclass
 class Coordinate:
+    """Geographic latitude and longitude pair in decimal degrees."""
+
     latitude: float
     longitude: float
 
     def to_tuple(self) -> tuple[float, float]:
+        """Return coordinate as a (latitude, longitude) tuple."""
         return (self.latitude, self.longitude)
+
+
+@dataclass
+class HazardReport:
+    """Community-submitted road safety hazard report stored in application state."""
+
+    road: str
+    issue: str
+    reported_at: str
+
 
 @dataclass
 class CrashRecord:
+    """Historical bicycle collision record for a road segment."""
+
     total_crashes: int = 0
     severe_injuries: int = 0
     fatalities: int = 0
@@ -21,13 +36,18 @@ class CrashRecord:
     data_source: str = "Official Municipal Vision Zero Database"
     limitations: str = "Only police-reported bicycle incidents are recorded."
 
+
 @dataclass
 class RoadSegment:
+    """Evaluated road or trail segment with safety attributes and score."""
+
     segment_id: str
     name: str
     coordinates: List[Coordinate]
     length_km: float
-    infrastructure: str  # 'protected_bike_path', 'separated_lane', 'painted_lane', 'paved_shoulder', 'traffic_calmed_street', 'shared_lane', 'none'
+    # Supported infrastructure: 'protected_bike_path', 'separated_lane',
+    # 'painted_lane', 'paved_shoulder', 'traffic_calmed_street', 'shared_lane', 'none'
+    infrastructure: str
     speed_limit_mph: Optional[int]
     traffic_exposure: str  # 'very_low', 'low', 'moderate', 'high', 'heavy'
     crash_record: Optional[CrashRecord]
@@ -40,8 +60,11 @@ class RoadSegment:
     evidence_notes: str = ""
     safer_alternative: str = ""
 
+
 @dataclass
 class TurnInstruction:
+    """Turn-by-turn cycling navigation step along a route."""
+
     step_number: int
     instruction: str
     distance_m: float
@@ -49,8 +72,11 @@ class TurnInstruction:
     safety_warning: Optional[str] = None
     icon: str = "straight"  # 'turn_left', 'turn_right', 'straight', 'start', 'end'
 
+
 @dataclass
 class RouteOption:
+    """Candidate bicycle route option with safety metrics and segments."""
+
     route_type: str  # 'Safest', 'Balanced', 'Direct'
     total_distance_km: float
     estimated_duration_mins: float
@@ -65,8 +91,11 @@ class RouteOption:
     confidence_level: str = "MEDIUM"
     elevation_gain_m: float = 24.0
 
+
 @dataclass
 class SavedRouteItem:
+    """Bookmarked cycling route entry persisted to browser or JSON storage."""
+
     route_id: str
     name: str
     start_label: str
@@ -77,3 +106,4 @@ class SavedRouteItem:
     safety_score: float
     created_at: str
     gpx_content: str
+

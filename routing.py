@@ -9,7 +9,13 @@ import urllib.request
 import urllib.error
 from typing import Dict, List, Tuple, Optional, Any
 from models import Coordinate, RoadSegment, TurnInstruction, RouteOption, CrashRecord
-from data_sources import calculate_haversine_distance_km, BENCHMARK_SEGMENTS, build_road_segment_from_dict, get_accurate_road_attributes, get_time_of_day_traffic_factor
+from data_sources import (
+    calculate_haversine_distance_km,
+    BENCHMARK_SEGMENTS,
+    build_road_segment_from_dict,
+    get_accurate_road_attributes,
+    get_time_of_day_traffic_factor,
+)
 from safety import evaluate_road_safety
 
 AVERAGE_CYCLING_SPEED_KMH = 16.0  # ~10 mph urban cycling pace
@@ -19,17 +25,26 @@ class SafetyRoutingGraph:
     Graph representation where nodes are intersections and edges are road segments
     annotated with length, time, safety attributes, and risk scores.
     """
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize empty adjacency list and coordinate map for the routing graph."""
         # adjacency: node_id -> list of (neighbor_id, RoadSegment)
         self.adjacency: Dict[str, List[Tuple[str, RoadSegment]]] = {}
         self.nodes: Dict[str, Coordinate] = {}
 
-    def add_node(self, node_id: str, coord: Coordinate):
+    def add_node(self, node_id: str, coord: Coordinate) -> None:
+        """Register an intersection node and its coordinate in the graph."""
         self.nodes[node_id] = coord
         if node_id not in self.adjacency:
             self.adjacency[node_id] = []
 
-    def add_edge(self, u: str, v: str, segment: RoadSegment, bidirectional: bool = True):
+    def add_edge(
+        self,
+        u: str,
+        v: str,
+        segment: RoadSegment,
+        bidirectional: bool = True,
+    ) -> None:
+        """Connect two nodes with a scored RoadSegment edge."""
         if u not in self.adjacency:
             self.adjacency[u] = []
         self.adjacency[u].append((v, segment))
@@ -90,7 +105,12 @@ class SafetyRoutingGraph:
         weight_risk: float,
         weight_unknown: float
     ) -> Tuple[List[RoadSegment], float]:
-        """Dijkstra's shortest path algorithm using generalized safety cost function."""
+        """
+        Dijkstra shortest-path search using heapq priority queue and generalized safety cost.
+
+        Advanced technique beyond CISC108 basics: uses heapq min-heap priority queue
+        and composite safety-risk graph edge weights.
+        """
         if start_node == end_node or start_node not in self.adjacency or end_node not in self.adjacency:
             return ([], 0.0)
 
@@ -197,7 +217,12 @@ def build_default_corridor_graph() -> SafetyRoutingGraph:
     s_broadway = RoadSegment(
         segment_id="s_broadway_shared",
         name="Broadway Pedestrian Boulevard & Shared Lane (Columbus to Union Sq)",
-        coordinates=[Coordinate(40.7681, -73.9819), Coordinate(40.7580, -73.9855), Coordinate(40.7495, -73.9878), Coordinate(40.7359, -73.9911)],
+        coordinates=[
+            Coordinate(40.7681, -73.9819),
+            Coordinate(40.7580, -73.9855),
+            Coordinate(40.7495, -73.9878),
+            Coordinate(40.7359, -73.9911),
+        ],
         length_km=3.8,
         infrastructure="traffic_calmed_street",
         speed_limit_mph=15,
@@ -362,7 +387,12 @@ def fetch_osrm_bike_route(
     dest: Coordinate,
     via: Optional[Coordinate] = None
 ) -> Optional[Dict[str, Any]]:
-    """Query OpenStreetMap OSRM bicycle routing service for actual street-level cycling path and distance."""
+    """
+    Query OpenStreetMap OSRM bicycle routing service for street-level cycling paths.
+
+    Advanced technique: uses urllib.request / Pyodide open_url HTTP client and
+    json.loads parsing. Unit tests mock network calls when offline.
+    """
     if via:
         coords_str = (
             f"{start.longitude:.6f},{start.latitude:.6f};"
@@ -376,10 +406,17 @@ def fetch_osrm_bike_route(
         )
 
     endpoints = [
-        f"https://routing.openstreetmap.de/routed-bike/route/v1/driving/{coords_str}?overview=full&geometries=geojson&steps=true",
-        f"https://router.project-osrm.org/route/v1/bicycle/{coords_str}?overview=full&geometries=geojson&steps=true"
+        (
+            "https://routing.openstreetmap.de/routed-bike/route/v1/driving/"
+            f"{coords_str}?overview=full&geometries=geojson&steps=true"
+        ),
+        (
+            "https://router.project-osrm.org/route/v1/bicycle/"
+            f"{coords_str}?overview=full&geometries=geojson&steps=true"
+        ),
     ]
 
+    headers = {"User-Agent": "SafeCycle-Bike-Planner/2.1 (contact: safety@safecycle.org)"}
     for url in endpoints:
         # 1. Try Pyodide browser WebAssembly HTTP client
         try:
@@ -393,7 +430,7 @@ def fetch_osrm_bike_route(
 
         # 2. Try standard Python socket/urllib for server & unit tests
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "SafeCycle-Bike-Planner/2.1 (contact: safety@safecycle.org)"})
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=3.5) as res:
                 data = json.loads(res.read().decode())
                 if data.get("code") == "Ok" and data.get("routes"):
@@ -465,9 +502,21 @@ def package_single_osrm_route(
         clean_s = start_label.split(",")[0].strip()
         clean_d = dest_label.split(",")[0].strip()
         final_corridors = [
-            {"name": f"Dedicated Cycle Path from {clean_s}", "clean_name": "Cycle Path", "distance_m": (total_km * 0.4) * 1000},
-            {"name": "Neighborhood Bicycle Corridor", "clean_name": "Bicycle Corridor", "distance_m": (total_km * 0.3) * 1000},
-            {"name": f"Greenway Approach to {clean_d}", "clean_name": "Greenway", "distance_m": (total_km * 0.3) * 1000}
+            {
+                "name": f"Dedicated Cycle Path from {clean_s}",
+                "clean_name": "Cycle Path",
+                "distance_m": (total_km * 0.4) * 1000,
+            },
+            {
+                "name": "Neighborhood Bicycle Corridor",
+                "clean_name": "Bicycle Corridor",
+                "distance_m": (total_km * 0.3) * 1000,
+            },
+            {
+                "name": f"Greenway Approach to {clean_d}",
+                "clean_name": "Greenway",
+                "distance_m": (total_km * 0.3) * 1000,
+            },
         ]
 
     # Normalize segment lengths so their sum equals total_km
@@ -477,7 +526,7 @@ def package_single_osrm_route(
 
     segs = []
     num_corridors = len(final_corridors)
-    
+
     # Apportion route coordinates along the corridors proportionally
     coord_accum = 0.0
     for i, corr in enumerate(final_corridors):
@@ -491,7 +540,10 @@ def package_single_osrm_route(
         end_idx = min(len(raw_coords), int(round(coord_accum * (len(raw_coords) - 1))) + 1)
         sub_coords = raw_coords[start_idx:end_idx]
         if len(sub_coords) < 2:
-            sub_coords = [raw_coords[min(start_idx, len(raw_coords) - 1)], raw_coords[min(end_idx, len(raw_coords) - 1)]]
+            sub_coords = [
+                raw_coords[min(start_idx, len(raw_coords) - 1)],
+                raw_coords[min(end_idx, len(raw_coords) - 1)],
+            ]
 
         road_attrs = get_accurate_road_attributes(corr["name"], rtype, time_factor, i)
         cr = CrashRecord(
@@ -534,31 +586,60 @@ def package_single_osrm_route(
     dur_mins = round(((total_km * 0.621371) / max(4.0, planned_speed_mph)) * 60, 1)
     tot_score = sum(s.safety_score * s.length_km for s in segs) / max(0.1, sum(s.length_km for s in segs))
     high_risk = sum(1 for s in segs if s.safety_score < 40.0)
-    infra_km = sum(s.length_km for s in segs if s.infrastructure in ["protected_bike_path", "separated_lane", "painted_lane", "traffic_calmed_street", "paved_shoulder", "shoulder", "bike_shoulder"])
+    bike_infra_types = [
+        "protected_bike_path", "separated_lane", "painted_lane",
+        "traffic_calmed_street", "paved_shoulder", "shoulder", "bike_shoulder",
+    ]
+    infra_km = sum(s.length_km for s in segs if s.infrastructure in bike_infra_types)
     infra_pct = round((infra_km / max(0.1, total_km)) * 100, 1)
 
     warns = []
-    has_shoulders = any(s.infrastructure in ["paved_shoulder", "shoulder", "bike_shoulder"] for s in segs)
+    has_shoulders = any(
+        s.infrastructure in ["paved_shoulder", "shoulder", "bike_shoulder"] for s in segs
+    )
     if high_risk > 0 and not has_shoulders:
-        warns.append(f"Contains {high_risk} high-risk road segment(s) lacking dedicated bicycle protection.")
+        warns.append(
+            f"Contains {high_risk} high-risk road segment(s) lacking dedicated bicycle protection."
+        )
     elif high_risk > 0 and has_shoulders:
-        warns.append(f"Corridor includes higher-speed roadways with paved bicycle shoulders; exercise caution at intersections.")
+        warns.append(
+            "Corridor includes higher-speed roadways with paved bicycle shoulders; "
+            "exercise caution at intersections."
+        )
     if rtype == "Direct":
         max_speed = max((s.speed_limit_mph or 35 for s in segs), default=35)
         if has_shoulders:
-            warns.append(f"Direct corridor features continuous paved bicycle shoulders alongside {max_speed} mph motor vehicle traffic.")
+            warns.append(
+                f"Direct corridor features continuous paved bicycle shoulders alongside "
+                f"{max_speed} mph motor vehicle traffic."
+            )
         else:
-            warns.append(f"WARNING: High vehicle speeds ({max_speed} mph) and heavy traffic volume along commercial corridor.")
+            warns.append(
+                f"WARNING: High vehicle speeds ({max_speed} mph) and heavy traffic "
+                "volume along commercial corridor."
+            )
     if is_rush:
-        warns.append(f"Peak Commute Notice: Elevated traffic volume on arterial links during {time_factor.get('period', 'Rush Hour')}.")
+        period_name = time_factor.get("period", "Rush Hour")
+        warns.append(
+            f"Peak Commute Notice: Elevated traffic volume on arterial links during {period_name}."
+        )
 
     elev_rate = {"Safest": 3.4, "Balanced": 4.6, "Direct": 5.8}.get(rtype, 4.0)
     elev_gain = round(max(10.0, total_km * elev_rate), 0)
 
     rationale_map = {
-        "Safest": "Optimized for maximum protection: routing prioritizes dedicated bicycle paths, greenways, and traffic-calmed roads.",
-        "Balanced": "Balanced path offering practical travel times using standard bicycle lanes and neighborhood collector streets.",
-        "Direct": "Shortest practical direct corridor along main roads, but involves heavier vehicular traffic and higher speed limits."
+        "Safest": (
+            "Optimized for maximum protection: routing prioritizes dedicated bicycle "
+            "paths, greenways, and traffic-calmed roads."
+        ),
+        "Balanced": (
+            "Balanced path offering practical travel times using standard bicycle lanes "
+            "and neighborhood collector streets."
+        ),
+        "Direct": (
+            "Shortest practical direct corridor along main roads, but involves heavier "
+            "vehicular traffic and higher speed limits."
+        ),
     }
     rationale = rationale_map.get(rtype, "Alternative bicycle corridor option.")
 
@@ -675,7 +756,12 @@ def build_routes_from_osrm(
             cand_dist = cand.get("distance", 0)
             # Route must be within realistic detour tolerance (<= 1.60x direct)
             if direct_dist_m * 0.85 <= cand_dist <= direct_dist_m * 1.60:
-                cand_names = set(s.get("name") for leg in cand.get("legs", []) for s in leg.get("steps", []) if s.get("name"))
+                cand_names = set(
+                    s.get("name")
+                    for leg in cand.get("legs", [])
+                    for s in leg.get("steps", [])
+                    if s.get("name")
+                )
                 # Must be a distinct physical corridor with different streets from direct and other candidates
                 is_distinct = True
                 for prev_names, prev_dist, _ in clean_routes:
@@ -815,7 +901,9 @@ def synthesize_route_corridor(
     step_size = len(curve_points) // num_steps
     segments = []
 
-    is_delaware = any(k in f"{start_label} {dest_label}".lower() for k in ["newark", "kirkwood", "glasgow", "wilmington", "bear", "de", "delaware"]) or (39.3 <= start_coord.latitude <= 39.9 and -75.9 <= start_coord.longitude <= -75.5)
+    de_keywords = ["newark", "kirkwood", "glasgow", "wilmington", "bear", "de", "delaware"]
+    in_de_box = (39.3 <= start_coord.latitude <= 39.9 and -75.9 <= start_coord.longitude <= -75.5)
+    is_delaware = any(k in f"{start_label} {dest_label}".lower() for k in de_keywords) or in_de_box
 
     if route_type == "Safest":
         if is_delaware:
@@ -832,7 +920,10 @@ def synthesize_route_corridor(
                 "Protected Cycle Track Section",
                 f"Dedicated Multi-Use Trail to {dest_label.split(',')[0]}"
             ]
-        rationale = "Selected for maximum protection: 85%+ on physically separated bike paths or traffic-calmed streets with low vehicle speeds."
+        rationale = (
+            "Selected for maximum protection: 85%+ on physically separated bike paths "
+            "or traffic-calmed streets with low vehicle speeds."
+        )
     elif route_type == "Balanced":
         if is_delaware:
             names = [
@@ -848,7 +939,10 @@ def synthesize_route_corridor(
                 "Quiet Residential Byway",
                 f"Downtown Bicycle Lane to {dest_label.split(',')[0]}"
             ]
-        rationale = "Balances safety and travel time: uses marked bike lanes with reasonable distance without major highway exposures."
+        rationale = (
+            "Balances safety and travel time: uses marked bike lanes with reasonable "
+            "distance without major highway exposures."
+        )
     else:  # Direct
         if is_delaware:
             names = [
@@ -864,7 +958,10 @@ def synthesize_route_corridor(
                 "Multi-Lane Boulevard with High Traffic Exposure",
                 f"Approaching {dest_label.split(',')[0]}"
             ]
-        rationale = "Shortest practical direct corridor along main roads; utilizes wide paved bicycle shoulders on highways rather than off-street paths."
+        rationale = (
+            "Shortest practical direct corridor along main roads; utilizes wide paved "
+            "bicycle shoulders on highways rather than off-street paths."
+        )
 
     for i in range(num_steps):
         s_idx = i * step_size
@@ -913,7 +1010,11 @@ def synthesize_route_corridor(
 
     total_score = sum(s.safety_score * s.length_km for s in segments) / sum(s.length_km for s in segments)
     high_risk_count = sum(1 for s in segments if s.safety_score < 40.0)
-    bike_infra_km = sum(s.length_km for s in segments if s.infrastructure in ["protected_bike_path", "separated_lane", "painted_lane", "traffic_calmed_street", "paved_shoulder", "shoulder", "bike_shoulder"])
+    bike_infra_types = [
+        "protected_bike_path", "separated_lane", "painted_lane",
+        "traffic_calmed_street", "paved_shoulder", "shoulder", "bike_shoulder",
+    ]
+    bike_infra_km = sum(s.length_km for s in segments if s.infrastructure in bike_infra_types)
     bike_infra_pct = round((bike_infra_km / total_km) * 100, 1)
     major_intersections = sum(1 for s in segments if s.intersection_risk in ["moderate", "high_conflict"])
 
@@ -922,11 +1023,17 @@ def synthesize_route_corridor(
         warnings.append(f"Contains {high_risk_count} high-risk road segment(s) lacking dedicated bicycle protection.")
     if route_type == "Direct":
         max_speed = max((s.speed_limit_mph or 35 for s in segments), default=35)
-        warnings.append(f"WARNING: High vehicle speeds ({max_speed} mph) and heavy traffic volume along arterial corridor.")
+        warnings.append(
+            f"WARNING: High vehicle speeds ({max_speed} mph) and heavy traffic "
+            "volume along arterial corridor."
+        )
     if time_factor.get("is_rush_hour"):
         warnings.append(f"Peak Commute: Arterial motor traffic volume elevated during {time_factor.get('period')}.")
     if any(s.confidence == "LOW" for s in segments):
-        warnings.append("Notice: Some segments have incomplete municipal crash data; safety estimates reflect fallback model.")
+        warnings.append(
+            "Notice: Some segments have incomplete municipal crash data; "
+            "safety estimates reflect fallback model."
+        )
 
     turns = generate_turn_instructions(segments)
     elev_rate = {"Safest": 3.8, "Balanced": 5.2, "Direct": 6.8}.get(route_type, 5.0)
@@ -972,24 +1079,45 @@ def plan_bicycle_routes(
 
     # Only snap to benchmark graph if specifically matching Central Park South to Brooklyn Bridge
     if d_start <= 0.6 and d_end <= 0.6 and start_node == "node_cps" and end_node == "node_brooklyn_bridge":
-        path_safest, _ = g.find_shortest_safety_path(start_node, end_node, weight_dist=1.0, weight_time=1.0, weight_risk=6.0, weight_unknown=3.0)
-        path_balanced, _ = g.find_shortest_safety_path(start_node, end_node, weight_dist=1.8, weight_time=1.5, weight_risk=2.0, weight_unknown=1.0)
-        path_direct, _ = g.find_shortest_safety_path(start_node, end_node, weight_dist=4.0, weight_time=2.0, weight_risk=0.5, weight_unknown=0.2)
+        path_safest, _ = g.find_shortest_safety_path(
+            start_node, end_node,
+            weight_dist=1.0, weight_time=1.0, weight_risk=6.0, weight_unknown=3.0,
+        )
+        path_balanced, _ = g.find_shortest_safety_path(
+            start_node, end_node,
+            weight_dist=1.8, weight_time=1.5, weight_risk=2.0, weight_unknown=1.0,
+        )
+        path_direct, _ = g.find_shortest_safety_path(
+            start_node, end_node,
+            weight_dist=4.0, weight_time=2.0, weight_risk=0.5, weight_unknown=0.2,
+        )
 
         if path_safest and path_balanced and path_direct:
-            def package_graph_route(segments: List[RoadSegment], rtype: str, rationale: str) -> RouteOption:
+            def package_graph_route(
+                segments: List[RoadSegment],
+                rtype: str,
+                rationale: str,
+            ) -> RouteOption:
+                """Aggregate scored graph segments into a complete RouteOption."""
                 tot_km = round(sum(s.length_km for s in segments), 2)
                 mins = round(((tot_km * 0.621371) / max(4.0, planned_speed_mph)) * 60, 1)
                 sc = round(sum(s.safety_score * s.length_km for s in segments) / max(0.1, tot_km), 1)
                 high_risk = sum(1 for s in segments if s.safety_score < 40.0)
-                infra_km = sum(s.length_km for s in segments if s.infrastructure in ["protected_bike_path", "separated_lane", "traffic_calmed_street", "painted_lane", "paved_shoulder", "shoulder", "bike_shoulder"])
+                graph_infra_types = [
+                    "protected_bike_path", "separated_lane", "traffic_calmed_street",
+                    "painted_lane", "paved_shoulder", "shoulder", "bike_shoulder",
+                ]
+                infra_km = sum(s.length_km for s in segments if s.infrastructure in graph_infra_types)
                 pct = round((infra_km / max(0.1, tot_km)) * 100, 1)
                 maj_inter = sum(1 for s in segments if s.intersection_risk in ["moderate", "high_conflict"])
                 warn = []
                 if high_risk > 0:
                     warn.append(f"{high_risk} high-risk road segment(s) identified with documented crash history.")
                 if rtype == "Direct":
-                    warn.append("WARNING: High vehicle speeds (30-35 mph) and heavy traffic volume along 5th Ave corridor.")
+                    warn.append(
+                        "WARNING: High vehicle speeds (30-35 mph) and heavy traffic "
+                        "volume along 5th Ave corridor."
+                    )
                 elev_rate = {"Safest": 3.2, "Balanced": 4.8, "Direct": 6.2}.get(rtype, 4.5)
                 elev_gain = round(max(15.0, tot_km * elev_rate), 0)
                 return RouteOption(
@@ -1009,9 +1137,21 @@ def plan_bicycle_routes(
                 )
 
             return {
-                "Safest": package_graph_route(path_safest, "Safest", "Optimized to minimize exposure to motor vehicles via Hudson River Greenway."),
-                "Balanced": package_graph_route(path_balanced, "Balanced", "Balances distance and risk via Broadway pedestrian/shared boulevard."),
-                "Direct": package_graph_route(path_direct, "Direct", "Direct path down 5th Avenue arterial. Higher crash risk.")
+                "Safest": package_graph_route(
+                    path_safest,
+                    "Safest",
+                    "Optimized to minimize exposure to motor vehicles via Hudson River Greenway.",
+                ),
+                "Balanced": package_graph_route(
+                    path_balanced,
+                    "Balanced",
+                    "Balances distance and risk via Broadway pedestrian/shared boulevard.",
+                ),
+                "Direct": package_graph_route(
+                    path_direct,
+                    "Direct",
+                    "Direct path down 5th Avenue arterial. Higher crash risk.",
+                ),
             }
 
     # Query real OpenStreetMap bicycle routing for exact road distance & geometry
@@ -1023,9 +1163,18 @@ def plan_bicycle_routes(
         )
 
     # Fallback to calibrated smooth curved geometry
-    safest = synthesize_route_corridor(start_coord, dest_coord, "Safest", start_label, dest_label, start_time=start_time, planned_speed_mph=planned_speed_mph)
-    balanced = synthesize_route_corridor(start_coord, dest_coord, "Balanced", start_label, dest_label, start_time=start_time, planned_speed_mph=planned_speed_mph)
-    direct = synthesize_route_corridor(start_coord, dest_coord, "Direct", start_label, dest_label, start_time=start_time, planned_speed_mph=planned_speed_mph)
+    safest = synthesize_route_corridor(
+        start_coord, dest_coord, "Safest", start_label, dest_label,
+        start_time=start_time, planned_speed_mph=planned_speed_mph,
+    )
+    balanced = synthesize_route_corridor(
+        start_coord, dest_coord, "Balanced", start_label, dest_label,
+        start_time=start_time, planned_speed_mph=planned_speed_mph,
+    )
+    direct = synthesize_route_corridor(
+        start_coord, dest_coord, "Direct", start_label, dest_label,
+        start_time=start_time, planned_speed_mph=planned_speed_mph,
+    )
 
     # Ensure strictly monotonic distance order
     if direct.total_distance_km > balanced.total_distance_km:

@@ -2,23 +2,29 @@
 tests/test_routing.py - Automated tests for routing engine, mode selection, and consistency
 """
 import unittest
+from unittest.mock import patch
 from models import Coordinate
 from routing import plan_bicycle_routes, SafetyRoutingGraph
 from geocoding import geocode_address
 
 class TestRoutingEngine(unittest.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
+        """Initialize shared start and destination coordinates for routing tests."""
         self.start = Coordinate(40.7661, -73.9772)  # Central Park South
         self.dest = Coordinate(40.7126, -74.0048)   # Brooklyn Bridge
 
-    def test_safest_mode_prefers_lower_risk(self):
+    def test_safest_mode_prefers_lower_risk(self) -> None:
         """Safest mode should produce higher overall safety score than Direct mode."""
-        routes = plan_bicycle_routes(
-            self.start, self.dest,
-            "Central Park South", "Brooklyn Bridge",
-            max_risk_tolerance="low", detour_tolerance="50%"
-        )
+        with (
+            patch("routing.fetch_osrm_bike_route", return_value=None),
+            patch("routing.fetch_osrm_bike_routes", return_value=[], create=True),
+        ):
+            routes = plan_bicycle_routes(
+                self.start, self.dest,
+                "Central Park South", "Brooklyn Bridge",
+                max_risk_tolerance="low", detour_tolerance="50%"
+            )
         self.assertIn("Safest", routes)
         self.assertIn("Direct", routes)
         self.assertIn("Balanced", routes)
@@ -33,12 +39,16 @@ class TestRoutingEngine(unittest.TestCase):
         # Direct route distance should be shorter or equal
         self.assertLessEqual(direct.total_distance_km, safest.total_distance_km)
 
-    def test_balanced_mode_compromise(self):
+    def test_balanced_mode_compromise(self) -> None:
         """Balanced mode should offer an intermediate distance and safety profile."""
-        routes = plan_bicycle_routes(
-            self.start, self.dest,
-            "Central Park South", "Brooklyn Bridge"
-        )
+        with (
+            patch("routing.fetch_osrm_bike_route", return_value=None),
+            patch("routing.fetch_osrm_bike_routes", return_value=[], create=True),
+        ):
+            routes = plan_bicycle_routes(
+                self.start, self.dest,
+                "Central Park South", "Brooklyn Bridge"
+            )
         safest = routes["Safest"]
         balanced = routes["Balanced"]
         direct = routes["Direct"]
@@ -47,12 +57,16 @@ class TestRoutingEngine(unittest.TestCase):
         self.assertGreaterEqual(balanced.overall_safety_score, direct.overall_safety_score)
         self.assertLessEqual(balanced.overall_safety_score, safest.overall_safety_score + 1.0)
 
-    def test_units_consistency(self):
+    def test_units_consistency(self) -> None:
         """Distance and durations should use consistent units (km and minutes)."""
-        routes = plan_bicycle_routes(
-            self.start, self.dest,
-            "Central Park South", "Brooklyn Bridge"
-        )
+        with (
+            patch("routing.fetch_osrm_bike_route", return_value=None),
+            patch("routing.fetch_osrm_bike_routes", return_value=[], create=True),
+        ):
+            routes = plan_bicycle_routes(
+                self.start, self.dest,
+                "Central Park South", "Brooklyn Bridge"
+            )
         for mode, route in routes.items():
             self.assertGreater(route.total_distance_km, 0.5)
             self.assertLess(route.total_distance_km, 30.0)
@@ -61,25 +75,29 @@ class TestRoutingEngine(unittest.TestCase):
             expected_approx_mins = (route.total_distance_km / 16.0) * 60
             self.assertAlmostEqual(route.estimated_duration_mins, expected_approx_mins, delta=5.0)
 
-    def test_empty_or_invalid_coordinates_handled_gracefully(self):
+    def test_empty_or_invalid_coordinates_handled_gracefully(self) -> None:
         """Geocoding empty string gives user-facing error message without crashing."""
         coord, msg = geocode_address("")
         self.assertIsNone(coord)
         self.assertIn("valid", msg.lower())
 
-    def test_danger_not_hidden_on_direct_route(self):
+    def test_danger_not_hidden_on_direct_route(self) -> None:
         """Direct route must not hide dangerous segments: warnings or high-risk flags must be present."""
-        routes = plan_bicycle_routes(
-            self.start, self.dest,
-            "Central Park South", "Brooklyn Bridge"
-        )
+        with (
+            patch("routing.fetch_osrm_bike_route", return_value=None),
+            patch("routing.fetch_osrm_bike_routes", return_value=[], create=True),
+        ):
+            routes = plan_bicycle_routes(
+                self.start, self.dest,
+                "Central Park South", "Brooklyn Bridge"
+            )
         direct = routes["Direct"]
         self.assertTrue(
             direct.high_risk_segments_count > 0 or len(direct.warnings) > 0,
             "Direct route must identify dangerous segments or warnings."
         )
 
-    def test_accurate_road_corridors_and_speed_limits(self):
+    def test_accurate_road_corridors_and_speed_limits(self) -> None:
         """Corridor extraction and DOT speed lookup must assign verified speed limits to actual highway corridors."""
         from data_sources import get_accurate_road_attributes
         attrs_de72 = get_accurate_road_attributes("Sunset Lake Road (DE 72)", "Balanced")
@@ -114,7 +132,7 @@ class TestRoutingEngine(unittest.TestCase):
         self.assertEqual(attrs_trail["speed_limit_mph"], 15)
         self.assertEqual(attrs_trail["infrastructure"], "protected_bike_path")
 
-    def test_time_of_day_traffic_factor_and_rush_hour(self):
+    def test_time_of_day_traffic_factor_and_rush_hour(self) -> None:
         """Traffic factor must adapt during morning/evening commute hours vs mid-day and night."""
         from data_sources import get_time_of_day_traffic_factor, get_accurate_road_attributes
         tf_rush = get_time_of_day_traffic_factor("08:30 AM (Morning Peak Commute)")
@@ -131,7 +149,7 @@ class TestRoutingEngine(unittest.TestCase):
         self.assertEqual(attrs_rush["traffic_exposure"], "heavy")
         self.assertEqual(attrs_mid["traffic_exposure"], "high")
 
-    def test_planned_cycling_speed_duration(self):
+    def test_planned_cycling_speed_duration(self) -> None:
         """Planned speed setting dynamically updates duration estimates in minutes."""
         from routing import package_single_osrm_route
         mock_route = {
@@ -139,23 +157,39 @@ class TestRoutingEngine(unittest.TestCase):
             "duration": 3600,
             "geometry": {"coordinates": [[-75.747, 39.676], [-75.696, 39.571]]},
             "legs": [{"steps": [
-                {"name": "Sunset Lake Road (DE 72)", "distance": 8000, "duration": 1800, "geometry": {"coordinates": [[-75.747, 39.676], [-75.72, 39.62]]}},
-                {"name": "Wrangle Hill Road (DE 72)", "distance": 8093.4, "duration": 1800, "geometry": {"coordinates": [[-75.72, 39.62], [-75.696, 39.571]]}}
+                {
+                    "name": "Sunset Lake Road (DE 72)",
+                    "distance": 8000,
+                    "duration": 1800,
+                    "geometry": {"coordinates": [[-75.747, 39.676], [-75.72, 39.62]]},
+                },
+                {
+                    "name": "Wrangle Hill Road (DE 72)",
+                    "distance": 8093.4,
+                    "duration": 1800,
+                    "geometry": {"coordinates": [[-75.72, 39.62], [-75.696, 39.571]]},
+                },
             ]}]
         }
         # 10 miles at 10 mph = 60 minutes
-        r_10 = package_single_osrm_route("Direct", mock_route, self.start, self.dest, "Start", "Dest", 16.09, planned_speed_mph=10.0)
+        r_10 = package_single_osrm_route(
+            "Direct", mock_route, self.start, self.dest, "Start", "Dest", 16.09, planned_speed_mph=10.0
+        )
         self.assertAlmostEqual(r_10.estimated_duration_mins, 60.0, delta=1.0)
 
         # 10 miles at 15 mph = 40 minutes
-        r_15 = package_single_osrm_route("Direct", mock_route, self.start, self.dest, "Start", "Dest", 16.09, planned_speed_mph=15.0)
+        r_15 = package_single_osrm_route(
+            "Direct", mock_route, self.start, self.dest, "Start", "Dest", 16.09, planned_speed_mph=15.0
+        )
         self.assertAlmostEqual(r_15.estimated_duration_mins, 40.0, delta=1.0)
 
         # 10 miles at 20 mph = 30 minutes
-        r_20 = package_single_osrm_route("Direct", mock_route, self.start, self.dest, "Start", "Dest", 16.09, planned_speed_mph=20.0)
+        r_20 = package_single_osrm_route(
+            "Direct", mock_route, self.start, self.dest, "Start", "Dest", 16.09, planned_speed_mph=20.0
+        )
         self.assertAlmostEqual(r_20.estimated_duration_mins, 30.0, delta=1.0)
 
-    def test_schedule_calculation_and_type_safety(self):
+    def test_schedule_calculation_and_type_safety(self) -> None:
         """Verifies start and end times calculation from typed inputs, and resilient float conversion."""
         import sys
         sys.path.insert(0, ".")
@@ -189,7 +223,8 @@ class TestRoutingEngine(unittest.TestCase):
 class TestSavedRoutesPersistence(unittest.TestCase):
     """Tests for Saved Routes persistence, duplicate prevention, and GPX export."""
 
-    def test_add_load_and_delete_saved_route(self):
+    def test_add_load_and_delete_saved_route(self) -> None:
+        """Verify adding, updating, querying, and deleting saved routes."""
         from storage import (
             add_saved_route, load_saved_routes, delete_saved_route,
             is_route_saved, get_saved_route_by_id
@@ -235,7 +270,8 @@ class TestSavedRoutesPersistence(unittest.TestCase):
         self.assertIsNone(get_saved_route_by_id(item.route_id))
         self.assertFalse(is_route_saved("Newark, DE", "Newark Reservoir, DE", "Safest"))
 
-    def test_beta_mode_gates_saved_routes_and_keeps_gpx_export(self):
+    def test_beta_mode_gates_saved_routes_and_keeps_gpx_export(self) -> None:
+        """Verify Beta Mode hides Saved Routes controls while keeping GPX export enabled."""
         import os
         from unittest.mock import patch
         os.environ["DRAFTER_SKIP"] = "true"

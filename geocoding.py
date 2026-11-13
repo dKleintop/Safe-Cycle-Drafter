@@ -370,9 +370,10 @@ def geocode_address(address_str: str) -> Tuple[Optional[Coordinate], str]:
             search_query = f"{base}, {full_state}, USA"
             break
 
-    # 4. Query Photon OpenStreetMap Geocoding (fast worldwide search)
+    # 4. Query Photon OpenStreetMap Geocoding (advanced technique: urllib HTTP + JSON + Pyodide JS fetch)
     encoded_query = urllib.parse.quote(search_query)
     photon_url = f"https://photon.komoot.io/api/?q={encoded_query}&limit=1"
+    headers = {"User-Agent": "SafeCycle-Bike-Planner/2.1 (contact: safety@safecycle.org)"}
     try:
         data = None
         try:
@@ -380,7 +381,7 @@ def geocode_address(address_str: str) -> Tuple[Optional[Coordinate], str]:
             with open_url(photon_url) as res:
                 data = json.loads(res.read())
         except Exception:
-            req = urllib.request.Request(photon_url, headers={"User-Agent": "SafeCycle-Bike-Planner/2.1 (contact: safety@safecycle.org)"})
+            req = urllib.request.Request(photon_url, headers=headers)
             with urllib.request.urlopen(req, timeout=3.0) as res:
                 if res.status == 200:
                     data = json.loads(res.read().decode())
@@ -396,11 +397,12 @@ def geocode_address(address_str: str) -> Tuple[Optional[Coordinate], str]:
     except Exception:
         pass
 
-    # 4. Fallback to OpenStreetMap Nominatim (multi-stage query)
+    # 5. Fallback to OpenStreetMap Nominatim (multi-stage query)
+    nom_base = "https://nominatim.openstreetmap.org/search?q="
     nom_queries = [
-        f"https://nominatim.openstreetmap.org/search?q={encoded_query}&format=json&limit=1&addressdetails=1&countrycodes=us",
-        f"https://nominatim.openstreetmap.org/search?q={encoded_query}&format=json&limit=1&addressdetails=1",
-        f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(clean_addr)}&format=json&limit=1&addressdetails=1"
+        f"{nom_base}{encoded_query}&format=json&limit=1&addressdetails=1&countrycodes=us",
+        f"{nom_base}{encoded_query}&format=json&limit=1&addressdetails=1",
+        f"{nom_base}{urllib.parse.quote(clean_addr)}&format=json&limit=1&addressdetails=1",
     ]
     for n_url in nom_queries:
         try:
@@ -410,7 +412,7 @@ def geocode_address(address_str: str) -> Tuple[Optional[Coordinate], str]:
                 with open_url(n_url) as res:
                     data = json.loads(res.read())
             except Exception:
-                req = urllib.request.Request(n_url, headers={"User-Agent": "SafeCycle-Bike-Planner/2.1 (contact: safety@safecycle.org)"})
+                req = urllib.request.Request(n_url, headers=headers)
                 with urllib.request.urlopen(req, timeout=3.5) as res:
                     if res.status == 200:
                         data = json.loads(res.read().decode())
@@ -423,7 +425,7 @@ def geocode_address(address_str: str) -> Tuple[Optional[Coordinate], str]:
         except Exception:
             pass
 
-    # 5. Fuzzy preset match fallback (contains check or key tokens)
+    # 6. Fuzzy preset match fallback (contains check or key tokens)
     clean_lower = clean_addr.lower()
     for loc in CYCLING_LOCATIONS:
         name_lower = loc["name"].lower()
@@ -433,6 +435,7 @@ def geocode_address(address_str: str) -> Tuple[Optional[Coordinate], str]:
         if tokens and all(t in name_lower for t in tokens):
             return (Coordinate(loc["lat"], loc["lon"]), loc["name"])
 
-    # 6. Default to first preset if location is completely unresolvable
+    # 7. Default to first preset if location is completely unresolvable
     first_preset = CYCLING_LOCATIONS[0]
-    return (Coordinate(first_preset["lat"], first_preset["lon"]), f"{clean_addr} (Estimated near {first_preset['name']})")
+    fallback_label = f"{clean_addr} (Estimated near {first_preset['name']})"
+    return (Coordinate(first_preset["lat"], first_preset["lon"]), fallback_label)

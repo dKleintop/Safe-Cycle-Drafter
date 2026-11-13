@@ -136,16 +136,26 @@ def evaluate_road_safety(
     infra_key = infrastructure.lower().strip()
     infra_score = INFRASTRUCTURE_SCORES.get(infra_key, 25.0)
     if infra_key in ["protected_bike_path", "separated_lane"]:
-        positives.append(f"Dedicated physical separation from motor vehicle traffic (+{int(infra_score * WEIGHT_INFRASTRUCTURE)} pts)")
+        pts = int(infra_score * WEIGHT_INFRASTRUCTURE)
+        positives.append(
+            "Dedicated physical separation from motor vehicle traffic "
+            f"(+{pts} pts)"
+        )
         known_data_points += 1
     elif infra_key == "traffic_calmed_street":
-        positives.append(f"Traffic-calmed neighborhood greenway (+{int(infra_score * WEIGHT_INFRASTRUCTURE)} pts)")
+        pts = int(infra_score * WEIGHT_INFRASTRUCTURE)
+        positives.append(f"Traffic-calmed neighborhood greenway (+{pts} pts)")
         known_data_points += 1
     elif infra_key == "painted_lane":
-        positives.append(f"Designated painted bicycle lane (+{int(infra_score * WEIGHT_INFRASTRUCTURE)} pts)")
+        pts = int(infra_score * WEIGHT_INFRASTRUCTURE)
+        positives.append(f"Designated painted bicycle lane (+{pts} pts)")
         known_data_points += 1
     elif infra_key in ["paved_shoulder", "shoulder", "bike_shoulder"]:
-        positives.append(f"Dedicated paved bicycle shoulder provides physical separation from motor traffic lanes (+{int(infra_score * WEIGHT_INFRASTRUCTURE)} pts)")
+        pts = int(infra_score * WEIGHT_INFRASTRUCTURE)
+        positives.append(
+            "Dedicated paved bicycle shoulder provides physical separation "
+            f"from motor traffic lanes (+{pts} pts)"
+        )
         known_data_points += 1
     elif infra_key == "shared_lane":
         negatives.append("Shared lane (sharrow): no physical or painted separation from traffic")
@@ -188,7 +198,9 @@ def evaluate_road_safety(
             positives.append(f"Zero reported bicycle collisions in official database ({crash_record.date_range})")
         else:
             negatives.append(
-                f"{crash_record.total_crashes} reported bicycle crash(es) ({crash_record.severe_injuries} severe, {crash_record.fatalities} fatal) ({crash_record.date_range})"
+                f"{crash_record.total_crashes} reported bicycle crash(es) "
+                f"({crash_record.severe_injuries} severe, "
+                f"{crash_record.fatalities} fatal) ({crash_record.date_range})"
             )
     else:
         negatives.append("Official municipal crash history data missing for this segment")

@@ -12,20 +12,29 @@ DATA_SOURCES_METADATA = {
         "name": "OpenStreetMap Road Network & Cycleway Tags",
         "date_accessed": "2026-Q4",
         "coverage": "Global street geometry, surface, cycleway classification",
-        "limitations": "Speed limits and bicycle infrastructure tags are community-contributed; coverage is variable outside dense urban centers."
+        "limitations": (
+            "Speed limits and bicycle infrastructure tags are community-contributed; "
+            "coverage is variable outside dense urban centers."
+        ),
     },
     "vision_zero": {
         "name": "Municipal Vision Zero & Police Collision Feeds (NYC, SF, Seattle, Portland)",
         "date_range": "January 2022 - October 2025",
         "coverage": "Geocoded motor vehicle collisions involving pedalcyclists, injury classifications",
-        "limitations": "Only police-reported incidents are captured. Near-misses and unreported cyclist falls are excluded. Cyclist exposure volume is estimated."
+        "limitations": (
+            "Only police-reported incidents are captured. Near-misses and unreported "
+            "cyclist falls are excluded. Cyclist exposure volume is estimated."
+        ),
     },
     "traffic_counts": {
         "name": "Department of Transportation Functional Classification & AADT Estimates",
         "date_range": "2023-2025 Average Annual Daily Traffic",
         "coverage": "Major and minor arterials, collector streets",
-        "limitations": "Residential streets lack automated vehicle counters; traffic level is inferred from roadway class."
-    }
+        "limitations": (
+            "Residential streets lack automated vehicle counters; "
+            "traffic level is inferred from roadway class."
+        ),
+    },
 }
 
 def calculate_haversine_distance_km(coord1: Coordinate, coord2: Coordinate) -> float:
@@ -55,7 +64,10 @@ BENCHMARK_SEGMENTS: List[Dict[str, Any]] = [
         "infrastructure": "protected_bike_path",
         "speed_limit_mph": 15,
         "traffic_exposure": "very_low",
-        "crashes": CrashRecord(total_crashes=0, severe_injuries=0, fatalities=0, date_range="2022-2025", data_source="NYC Vision Zero"),
+        "crashes": CrashRecord(
+            total_crashes=0, severe_injuries=0, fatalities=0,
+            date_range="2022-2025", data_source="NYC Vision Zero"
+        ),
         "intersection_risk": "low",
         "safer_alternative": "Already the safest north-south bicycle facility in Western Manhattan."
     },
@@ -68,7 +80,10 @@ BENCHMARK_SEGMENTS: List[Dict[str, Any]] = [
         "infrastructure": "separated_lane",
         "speed_limit_mph": 25,
         "traffic_exposure": "high",
-        "crashes": CrashRecord(total_crashes=2, severe_injuries=0, fatalities=0, date_range="2022-2025", data_source="NYC Vision Zero"),
+        "crashes": CrashRecord(
+            total_crashes=2, severe_injuries=0, fatalities=0,
+            date_range="2022-2025", data_source="NYC Vision Zero"
+        ),
         "intersection_risk": "moderate",
         "safer_alternative": "Hudson River Greenway offers full physical grade separation."
     },
@@ -81,7 +96,10 @@ BENCHMARK_SEGMENTS: List[Dict[str, Any]] = [
         "infrastructure": "none",
         "speed_limit_mph": 25,
         "traffic_exposure": "heavy",
-        "crashes": CrashRecord(total_crashes=8, severe_injuries=3, fatalities=1, date_range="2022-2025", data_source="NYC Vision Zero"),
+        "crashes": CrashRecord(
+            total_crashes=8, severe_injuries=3, fatalities=1,
+            date_range="2022-2025", data_source="NYC Vision Zero"
+        ),
         "intersection_risk": "high_conflict",
         "safer_alternative": "Divert west to Broadway Pedestrian/Bike Plaza or 6th Ave Protected Bike Lane."
     },
@@ -94,7 +112,10 @@ BENCHMARK_SEGMENTS: List[Dict[str, Any]] = [
         "infrastructure": "traffic_calmed_street",
         "speed_limit_mph": 15,
         "traffic_exposure": "low",
-        "crashes": CrashRecord(total_crashes=1, severe_injuries=0, fatalities=0, date_range="2022-2025", data_source="NYC Vision Zero"),
+        "crashes": CrashRecord(
+            total_crashes=1, severe_injuries=0, fatalities=0,
+            date_range="2022-2025", data_source="NYC Vision Zero"
+        ),
         "intersection_risk": "moderate",
         "safer_alternative": "Hudson River Greenway provides zero motor vehicle conflicts."
     },
@@ -107,7 +128,10 @@ BENCHMARK_SEGMENTS: List[Dict[str, Any]] = [
         "infrastructure": "protected_bike_path",
         "speed_limit_mph": 15,
         "traffic_exposure": "very_low",
-        "crashes": CrashRecord(total_crashes=0, severe_injuries=0, fatalities=0, date_range="2022-2025", data_source="NYC Vision Zero"),
+        "crashes": CrashRecord(
+            total_crashes=0, severe_injuries=0, fatalities=0,
+            date_range="2022-2025", data_source="NYC Vision Zero"
+        ),
         "intersection_risk": "low",
         "safer_alternative": "Primary grade-separated connection between Lower Manhattan and Downtown Brooklyn."
     },
@@ -121,7 +145,10 @@ BENCHMARK_SEGMENTS: List[Dict[str, Any]] = [
         "infrastructure": "separated_lane",
         "speed_limit_mph": 20,
         "traffic_exposure": "low",
-        "crashes": CrashRecord(total_crashes=1, severe_injuries=0, fatalities=0, date_range="2022-2025", data_source="SFMTA Vision Zero"),
+        "crashes": CrashRecord(
+            total_crashes=1, severe_injuries=0, fatalities=0,
+            date_range="2022-2025", data_source="SFMTA Vision Zero"
+        ),
         "intersection_risk": "moderate",
         "safer_alternative": "Market Street is SF's premier east-west bicycle corridor."
     },
@@ -134,7 +161,10 @@ BENCHMARK_SEGMENTS: List[Dict[str, Any]] = [
         "infrastructure": "traffic_calmed_street",
         "speed_limit_mph": 15,
         "traffic_exposure": "very_low",
-        "crashes": CrashRecord(total_crashes=0, severe_injuries=0, fatalities=0, date_range="2022-2025", data_source="SFMTA Vision Zero"),
+        "crashes": CrashRecord(
+            total_crashes=0, severe_injuries=0, fatalities=0,
+            date_range="2022-2025", data_source="SFMTA Vision Zero"
+        ),
         "intersection_risk": "low",
         "safer_alternative": "Optimal route avoiding steep hill grades and high-traffic arterials."
     },
@@ -147,7 +177,10 @@ BENCHMARK_SEGMENTS: List[Dict[str, Any]] = [
         "infrastructure": "painted_lane",
         "speed_limit_mph": 35,
         "traffic_exposure": "heavy",
-        "crashes": CrashRecord(total_crashes=7, severe_injuries=2, fatalities=0, date_range="2022-2025", data_source="SFMTA Vision Zero"),
+        "crashes": CrashRecord(
+            total_crashes=7, severe_injuries=2, fatalities=0,
+            date_range="2022-2025", data_source="SFMTA Vision Zero"
+        ),
         "intersection_risk": "high_conflict",
         "safer_alternative": "Use Page Street Slow Street or The Wiggle for a low-stress alternative."
     },
@@ -160,7 +193,10 @@ BENCHMARK_SEGMENTS: List[Dict[str, Any]] = [
         "infrastructure": "protected_bike_path",
         "speed_limit_mph": 15,
         "traffic_exposure": "very_low",
-        "crashes": CrashRecord(total_crashes=0, severe_injuries=0, fatalities=0, date_range="2022-2025", data_source="SFMTA Vision Zero"),
+        "crashes": CrashRecord(
+            total_crashes=0, severe_injuries=0, fatalities=0,
+            date_range="2022-2025", data_source="SFMTA Vision Zero"
+        ),
         "intersection_risk": "low",
         "safer_alternative": "Completely separated park path connecting Panhandle to Golden Gate Park."
     },
@@ -174,7 +210,10 @@ BENCHMARK_SEGMENTS: List[Dict[str, Any]] = [
         "infrastructure": "none",
         "speed_limit_mph": 50,
         "traffic_exposure": "heavy",
-        "crashes": CrashRecord(total_crashes=7, severe_injuries=2, fatalities=1, date_range="2022-2025", data_source="DelDOT Safety Management System"),
+        "crashes": CrashRecord(
+            total_crashes=7, severe_injuries=2, fatalities=1,
+            date_range="2022-2025", data_source="DelDOT Safety Management System"
+        ),
         "intersection_risk": "high_conflict",
         "safer_alternative": "Use Old Baltimore Pike or James F. Hall Trail to avoid 50 mph vehicle traffic."
     },
@@ -187,7 +226,10 @@ BENCHMARK_SEGMENTS: List[Dict[str, Any]] = [
         "infrastructure": "painted_lane",
         "speed_limit_mph": 45,
         "traffic_exposure": "high",
-        "crashes": CrashRecord(total_crashes=4, severe_injuries=1, fatalities=0, date_range="2022-2025", data_source="DelDOT Crash Database"),
+        "crashes": CrashRecord(
+            total_crashes=4, severe_injuries=1, fatalities=0,
+            date_range="2022-2025", data_source="DelDOT Crash Database"
+        ),
         "intersection_risk": "high_conflict",
         "safer_alternative": "Parallel routing via Old Baltimore Pike has lower speeds (35 mph)."
     },
@@ -200,7 +242,10 @@ BENCHMARK_SEGMENTS: List[Dict[str, Any]] = [
         "infrastructure": "painted_lane",
         "speed_limit_mph": 35,
         "traffic_exposure": "moderate",
-        "crashes": CrashRecord(total_crashes=2, severe_injuries=0, fatalities=0, date_range="2022-2025", data_source="DelDOT Traffic Engineering"),
+        "crashes": CrashRecord(
+            total_crashes=2, severe_injuries=0, fatalities=0,
+            date_range="2022-2025", data_source="DelDOT Traffic Engineering"
+        ),
         "intersection_risk": "moderate",
         "safer_alternative": "Scenic historic collector with dedicated bicycle shoulder."
     },
@@ -213,7 +258,10 @@ BENCHMARK_SEGMENTS: List[Dict[str, Any]] = [
         "infrastructure": "protected_bike_path",
         "speed_limit_mph": 15,
         "traffic_exposure": "very_low",
-        "crashes": CrashRecord(total_crashes=0, severe_injuries=0, fatalities=0, date_range="2022-2025", data_source="City of Newark Parks & Rec"),
+        "crashes": CrashRecord(
+            total_crashes=0, severe_injuries=0, fatalities=0,
+            date_range="2022-2025", data_source="City of Newark Parks & Rec"
+        ),
         "intersection_risk": "low",
         "safer_alternative": "Primary grade-separated east-west cycling greenway in Newark."
     }
@@ -267,14 +315,17 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
         else:
             h = 8
 
-    # Categorize into traffic periods based on 24-hour hour
+    # Advanced technique: regex extraction parses flexible 12/24-hour times
     if 7 <= h <= 9:
         return {
             "period": "Morning Peak Commute",
             "is_rush_hour": True,
             "multiplier": 1.45,
             "label": "Morning Rush Hour (Peak Commute)",
-            "advisory": "🚗 Peak Commute Active: Motor vehicle traffic is elevated on arterial corridors. Safest route with off-street trails is strongly recommended.",
+            "advisory": (
+                "🚗 Peak Commute Active: Motor vehicle traffic is elevated on arterial "
+                "corridors. Safest route with off-street trails is strongly recommended."
+            ),
             "speed_display_note": "Morning Peak"
         }
     elif 16 <= h <= 18:
@@ -283,7 +334,10 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
             "is_rush_hour": True,
             "multiplier": 1.50,
             "label": "Evening Rush Hour (High Collision Risk)",
-            "advisory": "⚠️ Evening Rush Hour: Heavy vehicular congestion, frequent intersection turn conflicts. Protected bicycle infrastructure highly advised.",
+            "advisory": (
+                "⚠️ Evening Rush Hour: Heavy vehicular congestion, frequent intersection "
+                "turn conflicts. Protected bicycle infrastructure highly advised."
+            ),
             "speed_display_note": "Evening Peak"
         }
     elif 14 <= h <= 15:
@@ -292,7 +346,10 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
             "is_rush_hour": False,
             "multiplier": 1.15,
             "label": "Afternoon (Active School Zones)",
-            "advisory": "🚌 Afternoon Traffic: Watch for school buses and local neighborhood cross-traffic.",
+            "advisory": (
+                "🚌 Afternoon Traffic: Watch for school buses and local neighborhood "
+                "cross-traffic."
+            ),
             "speed_display_note": "School Hours"
         }
     elif 19 <= h or h <= 6:
@@ -301,7 +358,10 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
             "is_rush_hour": False,
             "multiplier": 0.80,
             "label": "Night (Low Traffic Volume)",
-            "advisory": "🌙 Low vehicular traffic, but drivers travel at higher speeds. High-visibility lights and reflective clothing essential.",
+            "advisory": (
+                "🌙 Low vehicular traffic, but drivers travel at higher speeds. "
+                "High-visibility lights and reflective clothing essential."
+            ),
             "speed_display_note": "Night Hours"
         }
     else:  # 10 to 13 (Mid-day)
@@ -310,7 +370,10 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
             "is_rush_hour": False,
             "multiplier": 1.0,
             "label": "Mid-Day (Standard Traffic Flow)",
-            "advisory": "☀️ Daylight riding conditions with standard mid-day commercial traffic flow.",
+            "advisory": (
+                "☀️ Daylight riding conditions with standard mid-day commercial "
+                "traffic flow."
+            ),
             "speed_display_note": "Mid-Day"
         }
 
@@ -338,10 +401,14 @@ def get_accurate_road_attributes(
             "crashes": 7 if not is_rush else 8,
             "intersection_risk": "high_conflict",
             "data_source": "DelDOT Traffic Engineering & Crash Database",
-            "notes": "DelDOT Official: 50 mph divided arterial with wide paved shoulder; high speed & heavy truck traffic"
+            "notes": (
+                "DelDOT Official: 50 mph divided arterial with wide paved shoulder; "
+                "high speed & heavy truck traffic"
+            ),
         }
     if any(k in name_clean for k in ["summit bridge", "summit bridge road"]):
         traffic = "heavy" if is_rush else "high"
+        rush_suffix = " • [Peak Commute]" if is_rush else ""
         return {
             "speed_limit_mph": 45,
             "infrastructure": "paved_shoulder",
@@ -349,11 +416,15 @@ def get_accurate_road_attributes(
             "crashes": 4 if is_rush else 2,
             "intersection_risk": "moderate",
             "data_source": "DelDOT Bicycle Facility Network & Speed Zone",
-            "notes": f"DelDOT Official: 45 mph corridor with continuous paved bicycle shoulder (Delaware Bicycle Facility Network){' • [Peak Commute]' if is_rush else ''}"
+            "notes": (
+                "DelDOT Official: 45 mph corridor with continuous paved bicycle shoulder "
+                f"(Delaware Bicycle Facility Network){rush_suffix}"
+            ),
         }
     if any(k in name_clean for k in ["de 896", "de-896", "route 896"]):
         if any(k in name_clean for k in ["south", "glasgow", "summit", "highway"]):
             traffic = "heavy" if is_rush else "high"
+            rush_suffix = " • [Peak Commute]" if is_rush else ""
             return {
                 "speed_limit_mph": 45,
                 "infrastructure": "paved_shoulder",
@@ -361,7 +432,10 @@ def get_accurate_road_attributes(
                 "crashes": 4 if is_rush else 3,
                 "intersection_risk": "high_conflict" if is_rush else "moderate",
                 "data_source": "DelDOT Speed Zone Certification & Bicycle Facility Network",
-                "notes": f"DelDOT Official: 45 mph corridor with continuous wide paved bicycle shoulder{' • [Peak Commute]' if is_rush else ''}"
+                "notes": (
+                    "DelDOT Official: 45 mph corridor with continuous wide paved "
+                    f"bicycle shoulder{rush_suffix}"
+                ),
             }
         else:
             return {
@@ -371,11 +445,15 @@ def get_accurate_road_attributes(
                 "crashes": 1,
                 "intersection_risk": "moderate",
                 "data_source": "City of Newark Speed Ordinance",
-                "notes": "City of Newark: 25 mph speed zone near University of Delaware with marked bicycle lanes"
+                "notes": (
+                    "City of Newark: 25 mph speed zone near University of Delaware "
+                    "with marked bicycle lanes"
+                ),
             }
     if "south college" in name_clean or "college ave" in name_clean:
         if any(k in name_clean for k in ["south", "glasgow", "i-95", "arterial"]):
             traffic = "heavy" if is_rush else "high"
+            rush_suffix = " • [Peak Rush Hour]" if is_rush else ""
             return {
                 "speed_limit_mph": 45,
                 "infrastructure": "paved_shoulder",
@@ -383,7 +461,10 @@ def get_accurate_road_attributes(
                 "crashes": 3 if not is_rush else 4,
                 "intersection_risk": "moderate",
                 "data_source": "DelDOT Speed Zone Certification & Bicycle Facility Network",
-                "notes": f"DelDOT Official: 45 mph on South College Ave corridor with continuous paved bicycle shoulder{' • [Peak Rush Hour]' if is_rush else ''}"
+                "notes": (
+                    "DelDOT Official: 45 mph on South College Ave corridor with "
+                    f"continuous paved bicycle shoulder{rush_suffix}"
+                ),
             }
         else:
             return {
@@ -403,9 +484,15 @@ def get_accurate_road_attributes(
             "crashes": 0,
             "intersection_risk": "low",
             "data_source": "DelDOT Road Inventory & Delaware State Parks Access",
-            "notes": "DelDOT Official: 35 mph scenic collector with paved bicycle shoulder leading to Lums Pond"
+            "notes": (
+                "DelDOT Official: 35 mph scenic collector with paved bicycle "
+                "shoulder leading to Lums Pond"
+            ),
         }
-    if any(k in name_clean for k in ["buck jersey", "buck jersey road", "lums pond", "park entrance", "campground"]):
+    if any(
+        k in name_clean
+        for k in ["buck jersey", "buck jersey road", "lums pond", "park entrance", "campground"]
+    ):
         return {
             "speed_limit_mph": 25,
             "infrastructure": "paved_shoulder",
@@ -437,6 +524,7 @@ def get_accurate_road_attributes(
         }
     if any(k in name_clean for k in ["wrangle hill", "wrangle hill road", "de 72 wrangle"]):
         traffic = "heavy" if is_rush else "high"
+        rush_note = " • [Peak Rush Hour Traffic]" if is_rush else ""
         return {
             "speed_limit_mph": 45,
             "infrastructure": "paved_shoulder",
@@ -444,10 +532,14 @@ def get_accurate_road_attributes(
             "crashes": 5 if is_rush else 3,
             "intersection_risk": "high_conflict" if is_rush else "moderate",
             "data_source": "DelDOT Speed Zone Certification & Road Inventory",
-            "notes": f"DelDOT Official: 45 mph posted speed limit on DE 72 corridor with paved shoulder (50 mph south of US 40){' • [Peak Rush Hour Traffic]' if is_rush else ''}"
+            "notes": (
+                "DelDOT Official: 45 mph posted speed limit on DE 72 corridor with "
+                f"paved shoulder (50 mph south of US 40){rush_note}"
+            ),
         }
     if any(k in name_clean for k in ["sunset lake", "sunset lake road"]):
         traffic = "heavy" if is_rush else "high"
+        rush_note = " • [Peak Rush Hour Traffic]" if is_rush else ""
         return {
             "speed_limit_mph": 45,
             "infrastructure": "paved_shoulder",
@@ -455,7 +547,10 @@ def get_accurate_road_attributes(
             "crashes": 4 if is_rush else 2,
             "intersection_risk": "high_conflict" if is_rush else "moderate",
             "data_source": "DelDOT Traffic Engineering Speed Study",
-            "notes": f"DelDOT Official: 45 mph posted speed limit on DE 72 corridor with paved bicycle shoulder{' • [Peak Rush Hour Traffic]' if is_rush else ''}"
+            "notes": (
+                "DelDOT Official: 45 mph posted speed limit on DE 72 corridor with "
+                f"paved bicycle shoulder{rush_note}"
+            ),
         }
     if any(k in name_clean for k in ["red lion", "red lion road", "de 71", "route 71"]):
         traffic = "high" if is_rush else "moderate"
@@ -559,7 +654,11 @@ def get_accurate_road_attributes(
             "data_source": "City of Newark Municipal Code",
             "notes": "City of Newark: 25 mph downtown / university zone"
         }
-    if any(k in name_clean for k in ["trail", "greenway", "path", "cycleway", "pomeroy", "castle trail", "markell", "riverfront", "hall trail"]):
+    trail_keywords = [
+        "trail", "greenway", "path", "cycleway",
+        "pomeroy", "castle trail", "markell", "riverfront", "hall trail",
+    ]
+    if any(k in name_clean for k in trail_keywords):
         return {
             "speed_limit_mph": 15,
             "infrastructure": "protected_bike_path",
@@ -571,7 +670,13 @@ def get_accurate_road_attributes(
         }
 
     # 2. NYC Official Vision Zero Data
-    if any(k in name_clean for k in ["hudson river greenway", "east river greenway", "central park", "brooklyn bridge promenade"]):
+    nyc_greenways = [
+        "hudson river greenway",
+        "east river greenway",
+        "central park",
+        "brooklyn bridge promenade",
+    ]
+    if any(k in name_clean for k in nyc_greenways):
         return {
             "speed_limit_mph": 15,
             "infrastructure": "protected_bike_path",
@@ -602,7 +707,11 @@ def get_accurate_road_attributes(
                 "data_source": "NYC Vision Zero",
                 "notes": "NYC Vision Zero: 25 mph standard city speed limit"
             }
-    if any(k in name_clean for k in ["5th ave", "fifth ave", "6th ave", "sixth ave", "7th ave", "seventh ave", "madison ave", "lexington ave"]):
+    nyc_avenues = [
+        "5th ave", "fifth ave", "6th ave", "sixth ave",
+        "7th ave", "seventh ave", "madison ave", "lexington ave",
+    ]
+    if any(k in name_clean for k in nyc_avenues):
         return {
             "speed_limit_mph": 25,
             "infrastructure": "none" if route_type == "Direct" else "painted_lane",
@@ -657,9 +766,12 @@ def get_accurate_road_attributes(
             "notes": "Limited access highway: 65 mph limit (prohibited for bicycles)"
         }
     if any(k in name_clean for k in ["highway", "hwy", "us-", "us ", "route ", "rt-", "rt "]):
+        has_shld = any(
+            k in name_clean for k in ["shoulder", "state", "us", "rt", "hwy", "highway"]
+        )
         return {
             "speed_limit_mph": 45,
-            "infrastructure": "paved_shoulder" if any(k in name_clean for k in ["shoulder", "state", "us", "rt", "hwy", "highway"]) else "shared_lane",
+            "infrastructure": "paved_shoulder" if has_shld else "shared_lane",
             "traffic_exposure": "heavy",
             "crashes": 5,
             "intersection_risk": "high_conflict",
@@ -667,9 +779,15 @@ def get_accurate_road_attributes(
             "notes": "State/US Highway: 45 mph posted speed limit with paved shoulder"
         }
     if any(k in name_clean for k in ["parkway", "pkwy", "boulevard", "blvd", "pike", "bypass", "arterial"]):
+        if "pike" in name_clean:
+            infra_art = "paved_shoulder"
+        elif "lane" in name_clean:
+            infra_art = "painted_lane"
+        else:
+            infra_art = "shared_lane"
         return {
             "speed_limit_mph": 35,
-            "infrastructure": "paved_shoulder" if "pike" in name_clean else ("painted_lane" if "lane" in name_clean else "shared_lane"),
+            "infrastructure": infra_art,
             "traffic_exposure": "high",
             "crashes": 3,
             "intersection_risk": "moderate",
@@ -688,7 +806,11 @@ def get_accurate_road_attributes(
             "data_source": "DOT Road Classification",
             "notes": f"Secondary road: {speed} mph posted limit"
         }
-    if any(k in name_clean for k in ["lane", "ln", "drive", "dr", "way", "court", "ct", "circle", "cir", "place", "pl", "terrace", "ter", "alley"]):
+    res_suffixes = [
+        "lane", "ln", "drive", "dr", "way", "court", "ct",
+        "circle", "cir", "place", "pl", "terrace", "ter", "alley",
+    ]
+    if any(k in name_clean for k in res_suffixes):
         return {
             "speed_limit_mph": 20 if route_type == "Safest" else 25,
             "infrastructure": "traffic_calmed_street" if route_type == "Safest" else "painted_lane",
@@ -699,9 +821,15 @@ def get_accurate_road_attributes(
             "notes": "Residential neighborhood street: 20-25 mph limit"
         }
     if any(k in name_clean for k in ["street", "st", "avenue", "ave"]):
+        if route_type == "Safest":
+            st_infra = "traffic_calmed_street"
+        elif route_type == "Balanced":
+            st_infra = "painted_lane"
+        else:
+            st_infra = "shared_lane"
         return {
             "speed_limit_mph": 25,
-            "infrastructure": "traffic_calmed_street" if route_type == "Safest" else ("painted_lane" if route_type == "Balanced" else "shared_lane"),
+            "infrastructure": st_infra,
             "traffic_exposure": "moderate" if route_type != "Safest" else "low",
             "crashes": 1 if route_type != "Direct" else 2,
             "intersection_risk": "moderate" if route_type != "Safest" else "low",
