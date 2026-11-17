@@ -1,5 +1,5 @@
 """
-tests/test_routes.py - Unit tests covering all 37 Drafter @route functions in main.py
+tests/test_routes.py - Unit tests covering all 38 Drafter @route functions in main.py
 """
 import os
 import tempfile
@@ -114,11 +114,63 @@ class TestAllDrafterRoutes(unittest.TestCase):
 
             self.assertEqual(main.segment_details_page(st).__class__.__name__, "Page")
 
+            # Basic mode default hides safety breakdown, spectrum, crash records, and diagnostics
+            self.assertFalse(st.advanced_mode)
+            res_basic_html = str(main.route_results_page(st))
+            self.assertIn("Route Options Comparison", res_basic_html)
+            self.assertIn("Advanced Mode", res_basic_html)
+            self.assertNotIn("Safety Corridor Spectrum", res_basic_html)
+            self.assertNotIn("Road Corridor Safety Breakdown", res_basic_html)
+            self.assertNotIn("Key Streets Along Your Route", res_basic_html)
+            self.assertNotIn("Route Evaluation & Routing Diagnostics", res_basic_html)
+
+            det_basic_html = str(main.segment_details_page(st))
+            self.assertEqual(st.current_page, "details")
+            self.assertNotIn("Official Crash Records", det_basic_html)
+
+            # Toggle Advanced Mode ON from Details page shows Official Crash Records & stays on Details
+            det_adv_html = str(main.toggle_advanced_mode(st))
+            self.assertTrue(st.advanced_mode)
+            self.assertEqual(st.current_page, "details")
+            self.assertIn("Official Crash Records", det_adv_html)
+
+            # Results page in Advanced Mode shows full telemetry, but keeps Diagnostics hidden when Beta OFF
+            res_adv_html = str(main.route_results_page(st))
+            self.assertIn("Basic View", res_adv_html)
+            self.assertIn("Safety Corridor Spectrum", res_adv_html)
+            self.assertIn("Road Corridor Safety Breakdown", res_adv_html)
+            self.assertNotIn("Route Evaluation & Routing Diagnostics", res_adv_html)
+
+            # Toggle Advanced Mode OFF returns to Basic Mode on Results page
+            res_back_basic = str(main.toggle_advanced_mode(st))
+            self.assertFalse(st.advanced_mode)
+            self.assertEqual(st.current_page, "results")
+            self.assertNotIn("Safety Corridor Spectrum", res_back_basic)
+            self.assertNotIn("Road Corridor Safety Breakdown", res_back_basic)
+
             export_pg_html = str(main.handle_export_gpx(st))
             self.assertIn('data-auto-gpx="true"', export_pg_html)
             self.assertIn("safecycle_safest_route.gpx", export_pg_html)
             main.export_specific_gpx(st, "Direct")
             self.assertEqual(st.active_route_type, "Direct")
+
+            # Bike-themed loading overlay variations & non-mutating fast speed recalibration
+            for tok in (
+                "safecycle_loading_overlay",
+                "safecycleShowLoader",
+                "LOADER_VARIANTS",
+                "greenway",
+                "radar",
+                "climb",
+                "night",
+                "gpx",
+                "safecycleSelectLoaderVariant",
+            ):
+                self.assertIn(tok, main.THEME_AND_DOWNLOAD_JS)
+            orig_dur = routes["Safest"].estimated_duration_mins
+            recal = main.recalibrate_routes_for_speed(routes, 20.0)
+            self.assertLessEqual(recal["Safest"].estimated_duration_mins, orig_dur)
+            self.assertEqual(routes["Safest"].estimated_duration_mins, orig_dur)
 
             # Dark mode toggle preserves current page and toggles theme marker
             dark_pg_html = str(main.toggle_dark_mode(st))
@@ -144,9 +196,11 @@ class TestAllDrafterRoutes(unittest.TestCase):
             main.go_to_saved(st)
             self.assertEqual(st.current_page, "results")
 
-            # Toggle Beta Mode on
+            # Toggle Beta Mode on -> Diagnostics and Beta pages become visible
             main.toggle_beta_mode(st)
             self.assertTrue(st.beta_mode)
+            res_beta_html = str(main.route_results_page(st))
+            self.assertIn("Route Evaluation & Routing Diagnostics", res_beta_html)
 
             # Navigation routes
             nav_pg = main.start_route_navigation(st, "Safest")
@@ -205,6 +259,71 @@ class TestAllDrafterRoutes(unittest.TestCase):
             self.assertNotIn("Report a Road Hazard", about_standard_html)
             main.handle_submit_hazard(st, "Main St", "Ignored while Beta off")
             self.assertEqual(len(st.reported_hazards), 1)
+
+    def test_formatting_helpers_and_map_descriptions(self) -> None:
+        """Verify hours:mins duration formatting (>60 mins), thousands commas, and no map descriptions."""
+        self.assertEqual(main.format_duration_parts(45.0), ("45", "min"))
+        self.assertEqual(main.format_duration_parts(60.0), ("60", "min"))
+        self.assertEqual(main.format_duration_parts(61.0), ("1:01", "hr"))
+        self.assertEqual(main.format_duration_parts(125.0), ("2:05", "hrs"))
+        self.assertEqual(main.format_duration_text(185.0), "3:05 hrs")
+
+        self.assertEqual(main.format_number(999.0, 0), "999")
+        self.assertEqual(main.format_number(1000.0, 0), "1,000")
+        self.assertEqual(main.format_number(1234.56, 1), "1,234.6")
+
+        long_seg = main.RoadSegment(
+            segment_id="long_1",
+            name="Long Corridor",
+            length_km=2012.3,
+            infrastructure="protected_bike_path",
+            speed_limit_mph=20,
+            traffic_exposure="low",
+            intersection_risk="low",
+            crash_record=main.CrashRecord(total_crashes=0),
+            coordinates=[main.Coordinate(40.76, -73.98), main.Coordinate(40.77, -73.97)],
+        )
+        long_route = main.RouteOption(
+            route_type="Safest",
+            segments=[long_seg],
+            total_distance_km=2012.3,
+            estimated_duration_mins=125.0,
+            overall_safety_score=92.0,
+            bike_infrastructure_percentage=100.0,
+            high_risk_segments_count=0,
+            major_intersections_count=2,
+            warnings=[],
+            selection_rationale="Long distance test",
+            turn_instructions=[],
+            elevation_gain_m=1500.0,
+        )
+        basic_card_html = str(main.render_strava_route_card(long_route, "Safest", True, advanced_mode=False))
+        self.assertIn("2:05", basic_card_html)
+        self.assertIn("hrs", basic_card_html)
+        self.assertIn("1,250.4", basic_card_html)
+
+        adv_card_html = str(main.render_strava_route_card(long_route, "Safest", True, advanced_mode=True))
+        self.assertIn("2:05", adv_card_html)
+        self.assertIn("1,250.4", adv_card_html)
+        self.assertIn("2,012.3", adv_card_html)
+        self.assertIn("4,921", adv_card_html)
+        self.assertIn("1,500", adv_card_html)
+
+        with (
+            patch.object(main, "fetch_osrm_bike_routes", return_value=[]),
+            patch("urllib.request.urlopen", side_effect=OSError("offline test")),
+        ):
+            st = main.State()
+            planner_html = str(main.index(st))
+            self.assertNotIn(
+                "Interactive OpenStreetMap bicycle map showing start and destination coordinates.",
+                planner_html,
+            )
+            results_html = str(main.handle_generate_route(st))
+            self.assertNotIn(
+                "Interactive route map showing selected and possible cycling paths",
+                results_html,
+            )
 
 
 if __name__ == "__main__":

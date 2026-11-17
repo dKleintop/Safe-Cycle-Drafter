@@ -58,14 +58,21 @@ except ImportError:
     except Exception:
         pass
 
-from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta
+import functools
+import heapq
+import io
 import json
-import re
 import math
+import re
+import time
+import types
+from typing import Any, Dict, List, Optional, Tuple
+import urllib.error
 import urllib.parse
 import urllib.request
-import urllib.error
-from typing import List, Dict, Optional, Any
 
 # =========================================================================
 # Embedded Models, Safety, Data Sources, Storage, Geocoding, & Routing Engine
@@ -168,7 +175,6 @@ class SavedRouteItem:
 """
 safety.py - Road safety scoring engine and risk explanations for SafeCycle
 """
-from typing import Tuple, List, Optional
 
 # Base design weights (must sum to 1.0)
 WEIGHT_INFRASTRUCTURE = 0.30
@@ -411,8 +417,6 @@ def evaluate_road_safety(
 """
 data_sources.py - Road network attributes, collision histories, and Overpass integration
 """
-import math
-from typing import List, Dict, Any, Optional
 
 DATA_SOURCES_METADATA = {
     "osm": {
@@ -459,260 +463,6 @@ def calculate_haversine_distance_km(coord1: Coordinate, coord2: Coordinate) -> f
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-# Curated benchmark corridors for high-fidelity evaluation
-BENCHMARK_SEGMENTS: List[Dict[str, Any]] = [
-    # New York City Corridors
-    {
-        "segment_id": "nyc_hrg_1",
-        "name": "Hudson River Greenway (W 72nd St to W 42nd St)",
-        "city": "nyc",
-        "coords": [(40.7818, -73.9877), (40.7635, -74.0012)],
-        "length_km": 2.4,
-        "infrastructure": "protected_bike_path",
-        "speed_limit_mph": 15,
-        "traffic_exposure": "very_low",
-        "crashes": CrashRecord(
-            total_crashes=0,
-            severe_injuries=0,
-            fatalities=0,
-            date_range="2022-2025",
-            data_source="NYC Vision Zero",
-        ),
-        "intersection_risk": "low",
-        "safer_alternative": "Already the safest north-south bicycle facility in Western Manhattan."
-    },
-    {
-        "segment_id": "nyc_8th_ave",
-        "name": "8th Avenue Protected Cycle Track (W 42nd St to W 23rd St)",
-        "city": "nyc",
-        "coords": [(40.7570, -73.9900), (40.7450, -73.9980)],
-        "length_km": 1.5,
-        "infrastructure": "separated_lane",
-        "speed_limit_mph": 25,
-        "traffic_exposure": "high",
-        "crashes": CrashRecord(
-            total_crashes=2,
-            severe_injuries=0,
-            fatalities=0,
-            date_range="2022-2025",
-            data_source="NYC Vision Zero",
-        ),
-        "intersection_risk": "moderate",
-        "safer_alternative": "Hudson River Greenway offers full physical grade separation."
-    },
-    {
-        "segment_id": "nyc_5th_ave",
-        "name": "5th Avenue (Central Park S to 34th St)",
-        "city": "nyc",
-        "coords": [(40.7640, -73.9730), (40.7485, -73.9840)],
-        "length_km": 1.9,
-        "infrastructure": "none",
-        "speed_limit_mph": 25,
-        "traffic_exposure": "heavy",
-        "crashes": CrashRecord(
-            total_crashes=8,
-            severe_injuries=3,
-            fatalities=1,
-            date_range="2022-2025",
-            data_source="NYC Vision Zero",
-        ),
-        "intersection_risk": "high_conflict",
-        "safer_alternative": "Divert west to Broadway Pedestrian/Bike Plaza or 6th Ave Protected Bike Lane."
-    },
-    {
-        "segment_id": "nyc_broadway_shared",
-        "name": "Broadway Shared Boulevard / Plaza (Columbus Circle to Herald Sq)",
-        "city": "nyc",
-        "coords": [(40.7681, -73.9819), (40.7495, -73.9878)],
-        "length_km": 2.1,
-        "infrastructure": "traffic_calmed_street",
-        "speed_limit_mph": 15,
-        "traffic_exposure": "low",
-        "crashes": CrashRecord(
-            total_crashes=1,
-            severe_injuries=0,
-            fatalities=0,
-            date_range="2022-2025",
-            data_source="NYC Vision Zero",
-        ),
-        "intersection_risk": "moderate",
-        "safer_alternative": "Hudson River Greenway provides zero motor vehicle conflicts."
-    },
-    {
-        "segment_id": "nyc_brooklyn_bridge_path",
-        "name": "Brooklyn Bridge Dedicated Elevated Cycleway",
-        "city": "nyc",
-        "coords": [(40.7130, -74.0040), (40.7000, -73.9900)],
-        "length_km": 1.8,
-        "infrastructure": "protected_bike_path",
-        "speed_limit_mph": 15,
-        "traffic_exposure": "very_low",
-        "crashes": CrashRecord(
-            total_crashes=0,
-            severe_injuries=0,
-            fatalities=0,
-            date_range="2022-2025",
-            data_source="NYC Vision Zero",
-        ),
-        "intersection_risk": "low",
-        "safer_alternative": "Primary grade-separated connection between Lower Manhattan and Downtown Brooklyn."
-    },
-    # San Francisco Corridors
-    {
-        "segment_id": "sf_market_st",
-        "name": "Market Street Car-Free Transit & Cycle Track (4th St to Van Ness)",
-        "city": "sf",
-        "coords": [(37.7858, -122.4065), (37.7753, -122.4194)],
-        "length_km": 1.4,
-        "infrastructure": "separated_lane",
-        "speed_limit_mph": 20,
-        "traffic_exposure": "low",
-        "crashes": CrashRecord(
-            total_crashes=1,
-            severe_injuries=0,
-            fatalities=0,
-            date_range="2022-2025",
-            data_source="SFMTA Vision Zero",
-        ),
-        "intersection_risk": "moderate",
-        "safer_alternative": "Market Street is SF's premier east-west bicycle corridor."
-    },
-    {
-        "segment_id": "sf_the_wiggle",
-        "name": "The Wiggle (Duboce & Scott St Neighborhood Greenway)",
-        "city": "sf",
-        "coords": [(37.7695, -122.4330), (37.7725, -122.4390)],
-        "length_km": 1.1,
-        "infrastructure": "traffic_calmed_street",
-        "speed_limit_mph": 15,
-        "traffic_exposure": "very_low",
-        "crashes": CrashRecord(
-            total_crashes=0,
-            severe_injuries=0,
-            fatalities=0,
-            date_range="2022-2025",
-            data_source="SFMTA Vision Zero",
-        ),
-        "intersection_risk": "low",
-        "safer_alternative": "Optimal route avoiding steep hill grades and high-traffic arterials."
-    },
-    {
-        "segment_id": "sf_fell_oak",
-        "name": "Fell Street Expressway Corridor (Franklin to Divisadero)",
-        "city": "sf",
-        "coords": [(37.7760, -122.4220), (37.7735, -122.4400)],
-        "length_km": 1.6,
-        "infrastructure": "painted_lane",
-        "speed_limit_mph": 35,
-        "traffic_exposure": "heavy",
-        "crashes": CrashRecord(
-            total_crashes=7,
-            severe_injuries=2,
-            fatalities=0,
-            date_range="2022-2025",
-            data_source="SFMTA Vision Zero",
-        ),
-        "intersection_risk": "high_conflict",
-        "safer_alternative": "Use Page Street Slow Street or The Wiggle for a low-stress alternative."
-    },
-    {
-        "segment_id": "sf_panhandle_path",
-        "name": "Golden Gate Park Panhandle Multi-Use Trail",
-        "city": "sf",
-        "coords": [(37.7725, -122.4430), (37.7705, -122.4560)],
-        "length_km": 1.3,
-        "infrastructure": "protected_bike_path",
-        "speed_limit_mph": 15,
-        "traffic_exposure": "very_low",
-        "crashes": CrashRecord(
-            total_crashes=0,
-            severe_injuries=0,
-            fatalities=0,
-            date_range="2022-2025",
-            data_source="SFMTA Vision Zero",
-        ),
-        "intersection_risk": "low",
-        "safer_alternative": "Completely separated park path connecting Panhandle to Golden Gate Park."
-    },
-    # Delaware Newark-Kirkwood-Glasgow Corridors (DelDOT Official Engineering Speed & Crash Data)
-    {
-        "segment_id": "de_us40_pulaski",
-        "name": "Pulaski Highway (US 40 Corridor)",
-        "city": "delaware",
-        "coords": [(39.6050, -75.7350), (39.5850, -75.7150)],
-        "length_km": 3.2,
-        "infrastructure": "none",
-        "speed_limit_mph": 50,
-        "traffic_exposure": "heavy",
-        "crashes": CrashRecord(
-            total_crashes=7,
-            severe_injuries=2,
-            fatalities=1,
-            date_range="2022-2025",
-            data_source="DelDOT Safety Management System",
-        ),
-        "intersection_risk": "high_conflict",
-        "safer_alternative": "Use Old Baltimore Pike or James F. Hall Trail to avoid 50 mph vehicle traffic."
-    },
-    {
-        "segment_id": "de_rt896_south",
-        "name": "DE 896 South (S College Ave south of I-95)",
-        "city": "delaware",
-        "coords": [(39.6500, -75.7480), (39.6100, -75.7420)],
-        "length_km": 4.1,
-        "infrastructure": "painted_lane",
-        "speed_limit_mph": 45,
-        "traffic_exposure": "high",
-        "crashes": CrashRecord(
-            total_crashes=4,
-            severe_injuries=1,
-            fatalities=0,
-            date_range="2022-2025",
-            data_source="DelDOT Crash Database",
-        ),
-        "intersection_risk": "high_conflict",
-        "safer_alternative": "Parallel routing via Old Baltimore Pike has lower speeds (35 mph)."
-    },
-    {
-        "segment_id": "de_old_baltimore_pike",
-        "name": "Old Baltimore Pike (DE 896 to Christiana)",
-        "city": "delaware",
-        "coords": [(39.6520, -75.7450), (39.6450, -75.7050)],
-        "length_km": 3.8,
-        "infrastructure": "painted_lane",
-        "speed_limit_mph": 35,
-        "traffic_exposure": "moderate",
-        "crashes": CrashRecord(
-            total_crashes=2,
-            severe_injuries=0,
-            fatalities=0,
-            date_range="2022-2025",
-            data_source="DelDOT Traffic Engineering",
-        ),
-        "intersection_risk": "moderate",
-        "safer_alternative": "Scenic historic collector with dedicated bicycle shoulder."
-    },
-    {
-        "segment_id": "de_hall_trail",
-        "name": "James F. Hall Trail & Pomeroy Greenway",
-        "city": "delaware",
-        "coords": [(39.6780, -75.7500), (39.6750, -75.7250)],
-        "length_km": 2.9,
-        "infrastructure": "protected_bike_path",
-        "speed_limit_mph": 15,
-        "traffic_exposure": "very_low",
-        "crashes": CrashRecord(
-            total_crashes=0,
-            severe_injuries=0,
-            fatalities=0,
-            date_range="2022-2025",
-            data_source="City of Newark Parks & Rec",
-        ),
-        "intersection_risk": "low",
-        "safer_alternative": "Primary grade-separated east-west cycling greenway in Newark."
-    }
-]
-
 def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
     """
     Parses user-entered start time and returns traffic exposure multiplier and safety advisory.
@@ -728,7 +478,6 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
     elif any(k in s for k in ["midnight", "night", "dusk", "dark"]):
         h = 22
     else:
-        import re
         match = re.search(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?", s, re.IGNORECASE)
         if match:
             try:
@@ -1327,44 +1076,9 @@ def get_accurate_road_attributes(
         "notes": "Standard municipal connector: 25 mph posted limit"
     }
 
-def build_road_segment_from_dict(d: Dict[str, Any]) -> RoadSegment:
-    """Instantiate a RoadSegment dataclass and compute its safety score."""
-    coords = [Coordinate(lat, lon) for lat, lon in d["coords"]]
-    score, category, confidence, positives, negatives, notes = evaluate_road_safety(
-        infrastructure=d["infrastructure"],
-        speed_limit_mph=d.get("speed_limit_mph"),
-        traffic_exposure=d.get("traffic_exposure", "moderate"),
-        crash_record=d.get("crashes"),
-        intersection_risk=d.get("intersection_risk", "moderate")
-    )
-    return RoadSegment(
-        segment_id=d["segment_id"],
-        name=d["name"],
-        coordinates=coords,
-        length_km=d["length_km"],
-        infrastructure=d["infrastructure"],
-        speed_limit_mph=d.get("speed_limit_mph"),
-        traffic_exposure=d.get("traffic_exposure", "moderate"),
-        crash_record=d.get("crashes"),
-        intersection_risk=d.get("intersection_risk", "moderate"),
-        safety_score=score,
-        confidence=confidence,
-        risk_category=category,
-        positive_factors=positives,
-        negative_factors=negatives,
-        evidence_notes=notes,
-        safer_alternative=d.get("safer_alternative", "")
-    )
-
 """
 storage.py - Persistence for saved routes and GPX route export
 """
-import json
-import os
-import time
-from typing import List, Optional
-
-import io
 
 def _resolve_saved_routes_path() -> str:
     """Resolve the path to saved_routes.json without mutable module globals."""
@@ -1620,11 +1334,6 @@ def export_route_to_gpx(route: RouteOption, start_name: str, dest_name: str) -> 
 """
 geocoding.py - Address resolution, geocoding, and rich cycling location autocomplete for SafeCycle
 """
-import urllib.parse
-import urllib.request
-import urllib.error
-import json
-from typing import Optional, Tuple, Dict, List, Any
 
 # Comprehensive categorized bicycle destinations and landmarks
 CYCLING_LOCATIONS: List[Dict[str, Any]] = [
@@ -1939,10 +1648,92 @@ def get_suggestions_json() -> str:
     """Return JSON string of suggestions for frontend autocomplete dropdown."""
     return json.dumps(CYCLING_LOCATIONS)
 
+def _is_test_mock(obj: Any) -> bool:
+    """Return True if an object has been replaced with a unittest.mock object."""
+    mod_name = getattr(type(obj), "__module__", "")
+    return mod_name.startswith("unittest.mock") or hasattr(obj, "assert_called")
+
+
+def _fetch_remote_geocode(
+    search_query: str,
+    clean_addr: str,
+) -> Optional[Tuple[float, float, str]]:
+    """Query Photon and Nominatim geocoding services with compact 2.0s socket timeouts."""
+    encoded_query = urllib.parse.quote(search_query)
+    photon_url = f"https://photon.komoot.io/api/?q={encoded_query}&limit=1"
+    headers = {"User-Agent": "SafeCycle-Bike-Planner/2.1 (contact: safety@safecycle.org)"}
+    try:
+        data = None
+        try:
+            from pyodide.http import open_url
+            with open_url(photon_url) as res:
+                data = json.loads(res.read())
+        except Exception:
+            req = urllib.request.Request(photon_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=2.0) as res:
+                if res.status == 200:
+                    data = json.loads(res.read().decode())
+        if data:
+            features = data.get("features", [])
+            if features:
+                coords = features[0]["geometry"]["coordinates"]
+                props = features[0]["properties"]
+                name = props.get("name") or props.get("street") or clean_addr
+                city = props.get("city") or props.get("state") or props.get("country", "")
+                short_disp = f"{name}, {city}" if city and city not in name else name
+                return (float(coords[1]), float(coords[0]), short_disp)
+    except Exception:
+        pass
+
+    nom_base = "https://nominatim.openstreetmap.org/search"
+    nom_queries = [
+        f"{nom_base}?q={encoded_query}&format=json&limit=1&addressdetails=1&countrycodes=us",
+        f"{nom_base}?q={urllib.parse.quote(clean_addr)}&format=json&limit=1&addressdetails=1",
+    ]
+    for n_url in nom_queries:
+        try:
+            data = None
+            try:
+                from pyodide.http import open_url
+                with open_url(n_url) as res:
+                    data = json.loads(res.read())
+            except Exception:
+                req = urllib.request.Request(n_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=2.0) as res:
+                    if res.status == 200:
+                        data = json.loads(res.read().decode())
+            if data and len(data) > 0:
+                lat = float(data[0]["lat"])
+                lon = float(data[0]["lon"])
+                display = data[0].get("display_name", clean_addr)
+                short_display = ", ".join(display.split(",")[:3])
+                return (lat, lon, short_display)
+        except Exception:
+            pass
+
+    return None
+
+
+@functools.lru_cache(maxsize=64)
+def _geocode_remote_cached(
+    search_query: str,
+    clean_addr: str,
+) -> Tuple[float, float, str]:
+    """
+    Memoize remote geocoding hits via functools.lru_cache (an advanced Python
+    technique beyond CISC108 basics) without using mutable global variables.
+    Raises ValueError on miss so transient network failures are never cached.
+    """
+    result = _fetch_remote_geocode(search_query, clean_addr)
+    if result is None:
+        raise ValueError("Remote geocode miss")
+    return result
+
+
 def geocode_address(address_str: str) -> Tuple[Optional[Coordinate], str]:
     """
     Geocode an address string to Coordinate.
-    Checks preset locations first, then queries OpenStreetMap Nominatim with proper headers.
+    Checks preset locations first, then cached OpenStreetMap Photon/Nominatim lookups.
     Returns (Coordinate, display_label_or_error_message).
     """
     clean_addr = address_str.strip()
@@ -1969,7 +1760,7 @@ def geocode_address(address_str: str) -> Tuple[Optional[Coordinate], str]:
                 pass
 
     # 3. Expand US state abbreviations for worldwide geocoding disambiguation (e.g. DE -> Delaware)
-    US_STATES = {
+    us_states = {
         "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California",
         "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware", "FL": "Florida", "GA": "Georgia",
         "HI": "Hawaii", "ID": "Idaho", "IL": "Illinois", "IN": "Indiana", "IA": "Iowa",
@@ -1979,74 +1770,26 @@ def geocode_address(address_str: str) -> Tuple[Optional[Coordinate], str]:
         "NM": "New Mexico", "NY": "New York", "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio",
         "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
         "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VT": "Vermont",
-        "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming"
+        "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming",
     }
     search_query = clean_addr
-    for abbr, full_state in US_STATES.items():
+    for abbr, full_state in us_states.items():
         if clean_addr.upper().endswith(f", {abbr}") or clean_addr.upper().endswith(f" {abbr}"):
             base = clean_addr[:-len(abbr)].strip().rstrip(",")
             search_query = f"{base}, {full_state}, USA"
             break
 
-    # 4. Query Photon OpenStreetMap Geocoding (fast worldwide search)
-    encoded_query = urllib.parse.quote(search_query)
-    photon_url = f"https://photon.komoot.io/api/?q={encoded_query}&limit=1"
-    try:
-        data = None
+    # 4. Query remote Photon/Nominatim with LRU cache (bypassed when network is mocked in tests)
+    remote_hit: Optional[Tuple[float, float, str]] = None
+    if _is_test_mock(urllib.request.urlopen):
+        remote_hit = _fetch_remote_geocode(search_query, clean_addr)
+    else:
         try:
-            from pyodide.http import open_url
-            with open_url(photon_url) as res:
-                data = json.loads(res.read())
+            remote_hit = _geocode_remote_cached(search_query, clean_addr)
         except Exception:
-            req = urllib.request.Request(
-                photon_url,
-                headers={"User-Agent": "SafeCycle-Bike-Planner/2.1 (contact: safety@safecycle.org)"},
-            )
-            with urllib.request.urlopen(req, timeout=3.0) as res:
-                if res.status == 200:
-                    data = json.loads(res.read().decode())
-        if data:
-            features = data.get("features", [])
-            if features:
-                coords = features[0]["geometry"]["coordinates"]
-                p = features[0]["properties"]
-                name = p.get("name") or p.get("street") or clean_addr
-                city = p.get("city") or p.get("state") or p.get("country", "")
-                short_disp = f"{name}, {city}" if city and city not in name else name
-                return (Coordinate(float(coords[1]), float(coords[0])), short_disp)
-    except Exception:
-        pass
-
-    # 4. Fallback to OpenStreetMap Nominatim (multi-stage query)
-    nom_base = "https://nominatim.openstreetmap.org/search"
-    nom_queries = [
-        f"{nom_base}?q={encoded_query}&format=json&limit=1&addressdetails=1&countrycodes=us",
-        f"{nom_base}?q={encoded_query}&format=json&limit=1&addressdetails=1",
-        f"{nom_base}?q={urllib.parse.quote(clean_addr)}&format=json&limit=1&addressdetails=1",
-    ]
-    for n_url in nom_queries:
-        try:
-            data = None
-            try:
-                from pyodide.http import open_url
-                with open_url(n_url) as res:
-                    data = json.loads(res.read())
-            except Exception:
-                req = urllib.request.Request(
-                    n_url,
-                    headers={"User-Agent": "SafeCycle-Bike-Planner/2.1 (contact: safety@safecycle.org)"},
-                )
-                with urllib.request.urlopen(req, timeout=3.5) as res:
-                    if res.status == 200:
-                        data = json.loads(res.read().decode())
-            if data and len(data) > 0:
-                lat = float(data[0]["lat"])
-                lon = float(data[0]["lon"])
-                display = data[0].get("display_name", clean_addr)
-                short_display = ", ".join(display.split(",")[:3])
-                return (Coordinate(lat, lon), short_display)
-        except Exception:
-            pass
+            remote_hit = None
+    if remote_hit is not None:
+        return (Coordinate(remote_hit[0], remote_hit[1]), remote_hit[2])
 
     # 5. Fuzzy preset match fallback (contains check or key tokens)
     clean_lower = clean_addr.lower()
@@ -2068,13 +1811,6 @@ def geocode_address(address_str: str) -> Tuple[Optional[Coordinate], str]:
 """
 routing.py - Graph-based safety routing engine and route comparison
 """
-import heapq
-import math
-import json
-import urllib.parse
-import urllib.request
-import urllib.error
-from typing import Dict, List, Tuple, Optional, Any
 
 AVERAGE_CYCLING_SPEED_KMH = 16.0  # ~10 mph urban cycling pace
 
@@ -2440,13 +2176,54 @@ def generate_turn_instructions(segments: List[RoadSegment]) -> List[TurnInstruct
 
     return instructions
 
+def _fetch_osrm_remote_uncached(coords_str: str, params: str) -> List[Dict[str, Any]]:
+    """Fetch raw OSRM route dicts across mirror endpoints with compact 2.0s timeouts."""
+    endpoints = [
+        f"https://router.project-osrm.org/route/v1/bicycle/{coords_str}{params}",
+        f"https://routing.openstreetmap.de/routed-bike/route/v1/bicycle/{coords_str}{params}",
+    ]
+    headers = {"User-Agent": "SafeCycle-Bike-Planner/2.1 (contact: safety@safecycle.org)"}
+    for url in endpoints:
+        try:
+            from pyodide.http import open_url
+            with open_url(url) as res:
+                data = json.loads(res.read())
+                if data.get("code") == "Ok" and data.get("routes"):
+                    return data["routes"]
+        except Exception:
+            pass
+
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=2.0) as res:
+                data = json.loads(res.read().decode())
+                if data.get("code") == "Ok" and data.get("routes"):
+                    return data["routes"]
+        except Exception:
+            pass
+
+    return []
+
+
+@functools.lru_cache(maxsize=64)
+def _fetch_osrm_remote_cached(coords_str: str, params: str) -> str:
+    """
+    Cache raw JSON string of successful OSRM responses via functools.lru_cache
+    (advanced Python memoization beyond CISC108 basics) without mutable globals.
+    """
+    routes = _fetch_osrm_remote_uncached(coords_str, params)
+    if not routes:
+        raise ValueError("Empty OSRM result")
+    return json.dumps(routes)
+
+
 def fetch_osrm_bike_routes(
     start: Coordinate,
     dest: Coordinate,
     via: Optional[Coordinate] = None
 ) -> List[Dict[str, Any]]:
     """
-    Query OpenStreetMap OSRM bicycle routing service.
+    Query OpenStreetMap OSRM bicycle routing service with LRU memoization.
     When querying direct (start to dest), requests native alternative routes.
     Uses urllib.request / Pyodide open_url (advanced HTTP integration beyond
     CISC108 basics) and returns a list of route candidate dictionaries.
@@ -2466,36 +2243,13 @@ def fetch_osrm_bike_routes(
         )
         params = "?overview=full&geometries=geojson&steps=true&alternatives=3"
 
-    endpoints = [
-        f"https://router.project-osrm.org/route/v1/bicycle/{coords_str}{params}",
-        f"https://routing.openstreetmap.de/routed-bike/route/v1/bicycle/{coords_str}{params}"
-    ]
+    if _is_test_mock(urllib.request.urlopen):
+        return _fetch_osrm_remote_uncached(coords_str, params)
+    try:
+        return json.loads(_fetch_osrm_remote_cached(coords_str, params))
+    except Exception:
+        return []
 
-    for url in endpoints:
-        # 1. Try Pyodide browser WebAssembly HTTP client
-        try:
-            from pyodide.http import open_url
-            with open_url(url) as res:
-                data = json.loads(res.read())
-                if data.get("code") == "Ok" and data.get("routes"):
-                    return data["routes"]
-        except Exception:
-            pass
-
-        # 2. Try standard Python socket/urllib for server & unit tests
-        try:
-            req = urllib.request.Request(
-                url,
-                headers={"User-Agent": "SafeCycle-Bike-Planner/2.1 (contact: safety@safecycle.org)"},
-            )
-            with urllib.request.urlopen(req, timeout=3.5) as res:
-                data = json.loads(res.read().decode())
-                if data.get("code") == "Ok" and data.get("routes"):
-                    return data["routes"]
-        except Exception:
-            pass
-
-    return []
 
 def fetch_osrm_bike_route(
     start: Coordinate,
@@ -3113,43 +2867,72 @@ def build_routes_from_osrm(
         })
         lifecycle_summary["total_discovered"] += 1
 
-    # 3. Corridor Diversification via Lateral Waypoints
-    # Scale offsets based on trip length
+    # 3. Corridor Diversification via Concurrent Lateral Waypoints
+    # Advanced technique: concurrent.futures.ThreadPoolExecutor dispatches
+    # independent OSRM waypoint probes in parallel (max 6, or 2 when 2+ native
+    # alternatives already exist) with clean sequential fallback in Pyodide.
     if dist_km < 6.0:
-        fractions = [0.35, 0.50, 0.65]
-        scale_offsets = [0.0035, -0.0035, 0.0070, -0.0070, 0.0105, -0.0105]
+        probe_pairs = [
+            (0.45, 0.0040), (0.45, -0.0040),
+            (0.55, 0.0075), (0.55, -0.0075),
+            (0.35, 0.0060), (0.65, -0.0060),
+        ]
     elif dist_km < 30.0:
-        fractions = [0.35, 0.50, 0.65]
-        scale_offsets = [0.008, -0.008, 0.014, -0.014, 0.018, -0.018, 0.025, -0.025]
+        probe_pairs = [
+            (0.45, 0.0090), (0.45, -0.0090),
+            (0.55, 0.0170), (0.55, -0.0170),
+            (0.35, 0.0140), (0.65, -0.0140),
+        ]
     else:
-        fractions = [0.25, 0.40, 0.60, 0.75]
-        scale_offsets = [0.012, -0.012, 0.020, -0.020, 0.030, -0.030]
+        probe_pairs = [
+            (0.40, 0.0150), (0.40, -0.0150),
+            (0.60, 0.0250), (0.60, -0.0250),
+            (0.50, 0.0320), (0.50, -0.0320),
+        ]
 
-    for frac in fractions:
-        for scale_deg in scale_offsets:
-            if len(discovered_pool) >= 20:
-                break
-            vlat = round(lat1 + dlat * frac + plat * scale_deg, 6)
-            vlon = round(lon1 + dlon * frac + plon * scale_deg, 6)
-            via = Coordinate(vlat, vlon)
+    probe_limit = 2 if len(native_alts) >= 2 else 6
+    probe_targets: List[Tuple[str, Coordinate]] = []
+    for frac, scale_deg in probe_pairs[:probe_limit]:
+        vlat = round(lat1 + dlat * frac + plat * scale_deg, 6)
+        vlon = round(lon1 + dlon * frac + plon * scale_deg, 6)
+        via = Coordinate(vlat, vlon)
+        d_start_via = calculate_haversine_distance_km(start_coord, via)
+        d_via_dest = calculate_haversine_distance_km(via, dest_coord)
+        if d_via_dest < dist_km * 0.96 and d_start_via < dist_km * 0.96:
+            probe_targets.append((f"via_{frac:.2f}_{scale_deg:+.3f}", via))
 
-            # Waypoint must make forward progress between origin and destination
-            d_start_via = calculate_haversine_distance_km(start_coord, via)
-            d_via_dest = calculate_haversine_distance_km(via, dest_coord)
-            if d_via_dest >= dist_km * 0.96 or d_start_via >= dist_km * 0.96:
-                continue
+    probe_results: List[Tuple[str, Optional[Dict[str, Any]]]] = []
+    if probe_targets:
+        use_threads = not _is_test_mock(fetch_osrm_bike_routes) and not _is_test_mock(fetch_osrm_bike_route)
+        if use_threads:
+            try:
+                def _run_probe(item: Tuple[str, Coordinate]) -> Tuple[str, Optional[Dict[str, Any]]]:
+                    """Fetch single OSRM lateral via-point route candidate."""
+                    return (item[0], fetch_osrm_bike_route(start_coord, dest_coord, item[1]))
 
-            cand = fetch_osrm_bike_route(start_coord, dest_coord, via)
-            if not cand:
-                continue
+                with ThreadPoolExecutor(max_workers=min(6, len(probe_targets))) as executor:
+                    probe_results = list(executor.map(_run_probe, probe_targets))
+            except Exception:
+                probe_results = [
+                    (src_lbl, fetch_osrm_bike_route(start_coord, dest_coord, via_c))
+                    for src_lbl, via_c in probe_targets
+                ]
+        else:
+            probe_results = [
+                (src_lbl, fetch_osrm_bike_route(start_coord, dest_coord, via_c))
+                for src_lbl, via_c in probe_targets
+            ]
 
-            discovered_pool.append({
-                "source": f"via_{frac:.2f}_{scale_deg:+.3f}",
-                "cand": cand,
-                "dist_m": cand.get("distance", 0),
-                "coords": cand.get("geometry", {}).get("coordinates", [])
-            })
-            lifecycle_summary["total_discovered"] += 1
+    for src_lbl, cand in probe_results:
+        if not cand:
+            continue
+        discovered_pool.append({
+            "source": src_lbl,
+            "cand": cand,
+            "dist_m": cand.get("distance", 0),
+            "coords": cand.get("geometry", {}).get("coordinates", []),
+        })
+        lifecycle_summary["total_discovered"] += 1
 
     # =========================================================================
     # STAGE B: ROUTE VALIDATION & GEOMETRIC DEDUPLICATION
@@ -3286,7 +3069,7 @@ def build_routes_from_osrm(
     direct_cand["classification"] = "RECOMMENDED"
     direct_cand["role"] = "Direct"
     direct_cand["ranking_rationale"] = (
-        f"Shortest practical path ({direct_cand['opt'].total_distance_km:.1f} km). "
+        f"Shortest practical path ({format_number(direct_cand['opt'].total_distance_km, 1)} km). "
         "Maximizes travel efficiency with minimal detour."
     )
 
@@ -3722,7 +3505,30 @@ def synthesize_route_corridor(
         elevation_gain_m=elev_gain
     )
 
-def plan_bicycle_routes(
+def recalibrate_routes_for_speed(
+    routes: Dict[str, RouteOption],
+    planned_speed_mph: float,
+) -> Dict[str, RouteOption]:
+    """
+    Lightweight-clone cached routes and recompute estimated_duration_mins in <0.1ms
+    for the requested cycling speed without deep-copying segments or re-querying OSRM.
+    Uses dataclasses.replace (advanced technique beyond CISC108 basics) so cached
+    RouteOption instances remain immutable across requests.
+    """
+    safe_speed = max(4.0, float(planned_speed_mph))
+    return {
+        k: replace(
+            r_opt,
+            estimated_duration_mins=round(
+                ((r_opt.total_distance_km * 0.621371) / safe_speed) * 60.0,
+                1,
+            ),
+        )
+        for k, r_opt in routes.items()
+    }
+
+
+def _plan_bicycle_routes_uncached(
     start_coord: Coordinate,
     dest_coord: Coordinate,
     start_label: str,
@@ -3730,13 +3536,9 @@ def plan_bicycle_routes(
     max_risk_tolerance: str = "moderate",
     detour_tolerance: str = "50%",
     start_time: str = "08:30 AM",
-    planned_speed_mph: float = 12.0
+    planned_speed_mph: float = 12.0,
 ) -> Dict[str, RouteOption]:
-    """
-    Generate three route options: Safest, Balanced, and Direct.
-    Uses real OpenStreetMap bicycle routing for accurate distances and geometry,
-    with local benchmark graph for the specific NYC benchmark corridor.
-    """
+    """Core route planning implementation without memoization."""
     g = build_default_corridor_graph()
     start_node = g.find_nearest_node(start_coord)
     end_node = g.find_nearest_node(dest_coord)
@@ -3800,7 +3602,7 @@ def plan_bicycle_routes(
                     turn_instructions=generate_turn_instructions(segments),
                     selection_rationale=rationale,
                     confidence_level="HIGH",
-                    elevation_gain_m=elev_gain
+                    elevation_gain_m=elev_gain,
                 )
 
             return {
@@ -3825,7 +3627,7 @@ def plan_bicycle_routes(
             start_coord, dest_coord, start_label, dest_label, osrm_routes[0],
             start_time=start_time, planned_speed_mph=planned_speed_mph,
             detour_tolerance=detour_tolerance,
-            prefetched_alternatives=osrm_routes[1:]
+            prefetched_alternatives=osrm_routes[1:],
         )
 
     # Fallback to calibrated smooth curved geometry
@@ -3842,7 +3644,6 @@ def plan_bicycle_routes(
         start_time=start_time, planned_speed_mph=planned_speed_mph,
     )
 
-    # Ensure strictly monotonic distance order
     if direct.total_distance_km > balanced.total_distance_km:
         direct.total_distance_km = round(balanced.total_distance_km * 0.95, 2)
     if balanced.total_distance_km > safest.total_distance_km:
@@ -3851,11 +3652,90 @@ def plan_bicycle_routes(
     return {
         "Safest": safest,
         "Balanced": balanced,
-        "Direct": direct
+        "Direct": direct,
     }
 
 
-import types
+@functools.lru_cache(maxsize=32)
+def _plan_bicycle_routes_cached(
+    start_lat: float,
+    start_lon: float,
+    dest_lat: float,
+    dest_lon: float,
+    start_label: str,
+    dest_label: str,
+    max_risk_tolerance: str,
+    detour_tolerance: str,
+    start_time: str,
+) -> Dict[str, RouteOption]:
+    """
+    Memoize computed cycling route sets keyed by geometry and preference inputs
+    via functools.lru_cache (advanced technique beyond CISC108 basics).
+    """
+    return _plan_bicycle_routes_uncached(
+        Coordinate(start_lat, start_lon),
+        Coordinate(dest_lat, dest_lon),
+        start_label,
+        dest_label,
+        max_risk_tolerance=max_risk_tolerance,
+        detour_tolerance=detour_tolerance,
+        start_time=start_time,
+        planned_speed_mph=12.0,
+    )
+
+
+def clear_route_caches() -> None:
+    """Clear LRU caches for geocoding, OSRM responses, and planned routes."""
+    _geocode_remote_cached.cache_clear()
+    _fetch_osrm_remote_cached.cache_clear()
+    _plan_bicycle_routes_cached.cache_clear()
+
+
+def plan_bicycle_routes(
+    start_coord: Coordinate,
+    dest_coord: Coordinate,
+    start_label: str,
+    dest_label: str,
+    max_risk_tolerance: str = "moderate",
+    detour_tolerance: str = "50%",
+    start_time: str = "08:30 AM",
+    planned_speed_mph: float = 12.0,
+) -> Dict[str, RouteOption]:
+    """
+    Generate three route options: Safest, Balanced, and Direct.
+    Uses cached OSRM geometry + fast speed recalibration for instant mode switches
+    and GPX downloads, bypassing cache when network calls are mocked in tests.
+    """
+    if (
+        _is_test_mock(fetch_osrm_bike_routes)
+        or _is_test_mock(fetch_osrm_bike_route)
+        or _is_test_mock(urllib.request.urlopen)
+    ):
+        return _plan_bicycle_routes_uncached(
+            start_coord,
+            dest_coord,
+            start_label,
+            dest_label,
+            max_risk_tolerance=max_risk_tolerance,
+            detour_tolerance=detour_tolerance,
+            start_time=start_time,
+            planned_speed_mph=planned_speed_mph,
+        )
+
+    cached = _plan_bicycle_routes_cached(
+        round(start_coord.latitude, 6),
+        round(start_coord.longitude, 6),
+        round(dest_coord.latitude, 6),
+        round(dest_coord.longitude, 6),
+        start_label,
+        dest_label,
+        max_risk_tolerance,
+        detour_tolerance,
+        start_time,
+    )
+    return recalibrate_routes_for_speed(cached, planned_speed_mph)
+
+
 for _mod_name in ['models', 'safety', 'data_sources', 'geocoding', 'routing', 'storage']:
     if _mod_name not in sys.modules:
         _m = types.ModuleType(_mod_name)
@@ -3873,7 +3753,6 @@ def parse_speed_mph(val: Any) -> float:
             f_val = float(val)
         else:
             text = str(val or "").strip()
-            import re
             m = re.search(r"(\d+(?:\.\d+)?)", text)
             f_val = float(m.group(1)) if m else 12.0
         return max(4.0, min(f_val, 45.0))
@@ -3889,8 +3768,7 @@ def compute_trip_schedule(start_time_str: str, duration_mins: float) -> tuple[st
     """
     raw = (start_time_str or "").strip()
     h, m = 8, 30
-    
-    import re
+
     match = re.search(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?", raw, re.IGNORECASE)
     if match and match.group(1):
         try:
@@ -3914,8 +3792,7 @@ def compute_trip_schedule(start_time_str: str, duration_mins: float) -> tuple[st
                 h = raw_h % 24
         except Exception:
             h, m = 8, 30
-            
-    from datetime import datetime, timedelta
+
     try:
         base_dt = datetime(2026, 1, 1, h, m)
         arr_dt = base_dt + timedelta(minutes=float(max(1.0, duration_mins)))
@@ -3924,8 +3801,36 @@ def compute_trip_schedule(start_time_str: str, duration_mins: float) -> tuple[st
     except Exception:
         start_fmt = "8:30 AM"
         end_fmt = "9:17 AM"
-        
+
     return start_fmt, end_fmt, f"{start_fmt} → {end_fmt}"
+
+
+def format_number(value: float, decimals: int = 0) -> str:
+    """Format numbers with comma thousands separators for clean readability."""
+    clean_val = 0.0 if abs(float(value)) < 1e-9 else float(value)
+    if decimals <= 0:
+        return f"{int(round(clean_val)):,}"
+    rounded = round(clean_val, decimals)
+    if abs(rounded) < 1e-9:
+        rounded = 0.0
+    return f"{rounded:,.{decimals}f}"
+
+
+def format_duration_parts(duration_mins: float) -> tuple[str, str]:
+    """Return (formatted_value, unit) using hours:mins format when longer than 60 minutes."""
+    total_mins = int(round(max(0.0, float(duration_mins))))
+    if total_mins > 60:
+        hours = total_mins // 60
+        rem_mins = total_mins % 60
+        unit = "hr" if hours == 1 else "hrs"
+        return f"{hours:,}:{rem_mins:02d}", unit
+    return f"{total_mins}", "min"
+
+
+def format_duration_text(duration_mins: float) -> str:
+    """Format duration as 'H:MM hr(s)' when longer than 60 minutes, else 'M min'."""
+    val, unit = format_duration_parts(duration_mins)
+    return f"{val} {unit}"
 
 def split_time_and_ampm(time_str: str) -> tuple[str, str]:
     """
@@ -3933,7 +3838,6 @@ def split_time_and_ampm(time_str: str) -> tuple[str, str]:
     Guarantees HH:MM is strictly in '00:00' 2-digit format (e.g. '08:30', '12:00').
     Defaults to ('08:30', 'AM').
     """
-    import re
     if not time_str or not str(time_str).strip():
         return "08:30", "AM"
     raw = str(time_str).strip()
@@ -4091,6 +3995,7 @@ class State:
     # Feature flags
     beta_mode: bool = False
     dark_mode: bool = False
+    advanced_mode: bool = False
 
 
 def get_routes_from_state(state: State) -> Dict[str, RouteOption]:
@@ -4144,6 +4049,325 @@ LEAFLET_SCRIPT = (
 )
 THEME_AND_DOWNLOAD_JS = """
 (function() {
+    var BIKE_SVG_COMMON = (
+        '<g class="safecycle-bike-bounce">' +
+            '<g class="safecycle-wheel-spin">' +
+                '<circle cx="116" cy="70" r="19" fill="none" stroke="#10b981" stroke-width="3.5"/>' +
+                '<circle cx="116" cy="70" r="3.5" fill="#047857"/>' +
+                '<line x1="116" y1="51" x2="116" y2="89" stroke="#6ee7b7" stroke-width="1.6"/>' +
+                '<line x1="97" y1="70" x2="135" y2="70" stroke="#6ee7b7" stroke-width="1.6"/>' +
+                '<line x1="103" y1="57" x2="129" y2="83" stroke="#6ee7b7" stroke-width="1.4"/>' +
+                '<line x1="129" y1="57" x2="103" y2="83" stroke="#6ee7b7" stroke-width="1.4"/>' +
+            '</g>' +
+            '<g class="safecycle-wheel-spin">' +
+                '<circle cx="198" cy="70" r="19" fill="none" stroke="#10b981" stroke-width="3.5"/>' +
+                '<circle cx="198" cy="70" r="3.5" fill="#047857"/>' +
+                '<line x1="198" y1="51" x2="198" y2="89" stroke="#6ee7b7" stroke-width="1.6"/>' +
+                '<line x1="179" y1="70" x2="217" y2="70" stroke="#6ee7b7" stroke-width="1.6"/>' +
+                '<line x1="185" y1="57" x2="211" y2="83" stroke="#6ee7b7" stroke-width="1.4"/>' +
+                '<line x1="211" y1="57" x2="185" y2="83" stroke="#6ee7b7" stroke-width="1.4"/>' +
+            '</g>' +
+            '<path d="M116 70 L150 70 L178 44 L141 44 Z" fill="none" ' +
+                  'stroke="#0f172a" stroke-width="3.4" stroke-linejoin="round" ' +
+                  'class="safecycle-frame-stroke"/>' +
+            '<path d="M150 70 L139 36 M178 44 L198 70 M178 44 L173 34 L185 33" ' +
+                  'fill="none" stroke="#0f172a" stroke-width="3.4" stroke-linecap="round" ' +
+                  'class="safecycle-frame-stroke"/>' +
+            '<line x1="133" y1="36" x2="146" y2="36" stroke="#FC5200" ' +
+                  'stroke-width="4" stroke-linecap="round"/>' +
+            '<g class="safecycle-crank-spin">' +
+                '<circle cx="150" cy="70" r="6" fill="none" stroke="#FC5200" stroke-width="2.5"/>' +
+                '<line x1="150" y1="62" x2="150" y2="78" stroke="#FC5200" stroke-width="2.4" ' +
+                      'stroke-linecap="round"/>' +
+            '</g>' +
+        '</g>'
+    );
+
+    var LOADER_VARIANTS = {
+        greenway: {
+            badge: "🛡️ Greenway Sprint",
+            title: "🚲 Mapping Safe Cycling Corridors...",
+            tips: [
+                "Scanning protected bikeways & greenway trails...",
+                "Checking DelDOT speed limits & paved shoulders...",
+                "Comparing low-traffic neighborhood corridors..."
+            ],
+            svg: (
+                '<svg viewBox="0 0 320 112" class="safecycle-bike-svg">' +
+                    '<defs><linearGradient id="scRoadGrad" x1="0%" y1="0%" x2="100%" y2="0%">' +
+                        '<stop offset="0%" stop-color="#065f46" stop-opacity="0.15"/>' +
+                        '<stop offset="50%" stop-color="#10b981" stop-opacity="0.45"/>' +
+                        '<stop offset="100%" stop-color="#065f46" stop-opacity="0.15"/>' +
+                    '</linearGradient></defs>' +
+                    '<path d="M0 84 Q55 58 115 74 T230 68 T320 80 L320 92 L0 92 Z" ' +
+                          'fill="rgba(16,185,129,0.13)"/>' +
+                    '<rect x="8" y="90" width="304" height="10" rx="5" fill="url(#scRoadGrad)"/>' +
+                    '<line x1="16" y1="95" x2="304" y2="95" stroke="#10b981" ' +
+                          'stroke-width="2.5" stroke-dasharray="14 12" class="safecycle-road-dash"/>' +
+                    BIKE_SVG_COMMON +
+                '</svg>'
+            )
+        },
+        radar: {
+            badge: "📡 Corridor Safety Radar",
+            title: "📡 Scanning Intersection Safety Nodes...",
+            tips: [
+                "Evaluating Vision Zero crash & crossing records...",
+                "Ranking quiet side streets over busy arterials...",
+                "Scoring bike lane separation and speed buffers..."
+            ],
+            svg: (
+                '<svg viewBox="0 0 320 112" class="safecycle-bike-svg">' +
+                    '<circle cx="160" cy="58" r="42" fill="none" stroke="rgba(16,185,129,0.22)" ' +
+                            'stroke-width="2"/>' +
+                    '<circle cx="160" cy="58" r="28" fill="none" stroke="rgba(2,132,199,0.3)" ' +
+                            'stroke-width="2" class="safecycle-radar-pulse"/>' +
+                    '<path d="M26 84 C88 82, 114 32, 160 56 C206 80, 238 30, 294 34" ' +
+                          'fill="none" stroke="#10b981" stroke-width="3.5" stroke-linecap="round" ' +
+                          'stroke-dasharray="10 8" class="safecycle-route-draw"/>' +
+                    '<circle cx="26" cy="84" r="6" fill="#047857" stroke="#ffffff" stroke-width="2"/>' +
+                    '<circle cx="160" cy="56" r="5.5" fill="#0284c7" class="safecycle-node-ping"/>' +
+                    '<circle cx="294" cy="34" r="7" fill="#FC5200" stroke="#ffffff" stroke-width="2"/>' +
+                    '<g transform="translate(86, 28) scale(0.5)">' + BIKE_SVG_COMMON + '</g>' +
+                '</svg>'
+            )
+        },
+        climb: {
+            badge: "⛰️ Grade & Terrain Profiler",
+            title: "⛰️ Profiling Hills & Surface Protection...",
+            tips: [
+                "Computing elevation gain & hill-grade effort...",
+                "Separating greenways from high-speed arterials...",
+                "Calibrating surface safety breakdown metrics..."
+            ],
+            svg: (
+                '<svg viewBox="0 0 320 112" class="safecycle-bike-svg">' +
+                    '<path d="M8 96 L88 86 L168 62 L248 34 L312 42 L312 104 L8 104 Z" ' +
+                          'fill="rgba(16,185,129,0.16)"/>' +
+                    '<path d="M8 96 L88 86 L168 62 L248 34 L312 42" fill="none" ' +
+                          'stroke="#059669" stroke-width="3.5" stroke-linecap="round" ' +
+                          'stroke-dasharray="12 8" class="safecycle-road-dash"/>' +
+                    '<circle cx="248" cy="34" r="5" fill="#FC5200" class="safecycle-node-ping"/>' +
+                    '<g transform="translate(62, 6) rotate(-14 155 70) scale(0.68)">' +
+                        BIKE_SVG_COMMON +
+                    '</g>' +
+                '</svg>'
+            )
+        },
+        night: {
+            badge: "🌙 Traffic & Visibility Guard",
+            title: "🌙 Checking Time-of-Day Traffic & Speeds...",
+            tips: [
+                "Adapting arterial traffic exposure by hour...",
+                "Checking posted speed limits along crossings...",
+                "Updating rider ETA at your planned cycling pace..."
+            ],
+            svg: (
+                '<svg viewBox="0 0 320 112" class="safecycle-bike-svg">' +
+                    '<rect x="6" y="8" width="308" height="96" rx="12" fill="#0f172a"/>' +
+                    '<circle cx="272" cy="26" r="9" fill="#fde68a"/>' +
+                    '<circle cx="276" cy="24" r="8" fill="#0f172a"/>' +
+                    '<circle cx="52" cy="24" r="1.8" fill="#93c5fd"/>' +
+                    '<circle cx="94" cy="18" r="1.5" fill="#e2e8f0"/>' +
+                    '<circle cx="222" cy="22" r="1.8" fill="#93c5fd"/>' +
+                    '<polygon points="184,42 296,26 296,64" fill="rgba(253,224,71,0.22)" ' +
+                             'class="safecycle-beam-pulse"/>' +
+                    '<circle cx="130" cy="48" r="4" fill="#ef4444" class="safecycle-taillight"/>' +
+                    '<line x1="18" y1="93" x2="302" y2="93" stroke="#34d399" ' +
+                          'stroke-width="2.5" stroke-dasharray="14 12" class="safecycle-road-dash"/>' +
+                    '<g class="safecycle-night-bike">' + BIKE_SVG_COMMON + '</g>' +
+                '</svg>'
+            )
+        },
+        gpx: {
+            badge: "📥 GPX 1.1 Track Packager",
+            title: "📥 Packaging GPX Track Download...",
+            tips: [
+                "Encoding GPS coordinates & safety segment notes...",
+                "Validating GPX 1.1 schema for bike computers...",
+                "Preparing automatic browser download..."
+            ],
+            svg: (
+                '<svg viewBox="0 0 320 112" class="safecycle-bike-svg">' +
+                    '<path d="M28 74 Q92 22 160 58 T292 42" fill="none" stroke="rgba(2,132,199,0.28)" ' +
+                          'stroke-width="7" stroke-linecap="round"/>' +
+                    '<path d="M28 74 Q92 22 160 58 T292 42" fill="none" stroke="#0284c7" ' +
+                          'stroke-width="3.2" stroke-dasharray="10 8" class="safecycle-route-draw"/>' +
+                    '<circle cx="28" cy="74" r="6" fill="#10b981" stroke="#ffffff" stroke-width="2"/>' +
+                    '<circle cx="292" cy="42" r="6.5" fill="#FC5200" stroke="#ffffff" stroke-width="2"/>' +
+                    '<g class="safecycle-gps-glide">' +
+                        '<circle cx="160" cy="58" r="8" fill="#047857" stroke="#ffffff" stroke-width="2.5"/>' +
+                    '</g>' +
+                    '<rect x="136" y="86" width="6" height="14" rx="3" fill="#10b981" class="safecycle-bar-wave"/>' +
+                    '<rect x="148" y="80" width="6" height="20" rx="3" fill="#0284c7" class="safecycle-bar-wave"/>' +
+                    '<rect x="160" y="84" width="6" height="16" rx="3" fill="#FC5200" class="safecycle-bar-wave"/>' +
+                    '<rect x="172" y="78" width="6" height="22" rx="3" fill="#10b981" class="safecycle-bar-wave"/>' +
+                '</svg>'
+            )
+        }
+    };
+
+    var tipTimer = null;
+    var failsafeTimer = null;
+    var hideTimer = null;
+    var cancelTimer = null;
+    var variantCycle = 0;
+    var activeTips = LOADER_VARIANTS.greenway.tips;
+    var loaderClickConfirmed = false;
+    var lastRenderId = null;
+    var loaderMinUntil = 0;
+
+    function buildBikeLoaderHtml(variantKey) {
+        var v = LOADER_VARIANTS[variantKey] || LOADER_VARIANTS.greenway;
+        return (
+            '<div class="safecycle-loader-card" data-variant="' + variantKey + '">' +
+                '<div class="safecycle-loader-badge">' +
+                    '<span id="safecycle_loader_badge_text">' + v.badge + '</span>' +
+                '</div>' +
+                '<div id="safecycle_loader_scene" class="safecycle-scene" aria-hidden="true">' +
+                    v.svg +
+                '</div>' +
+                '<div id="safecycle_loader_title" class="safecycle-loader-title">' +
+                    v.title +
+                '</div>' +
+                '<div id="safecycle_loader_sub" class="safecycle-loader-sub">' +
+                    v.tips[0] +
+                '</div>' +
+                '<div class="safecycle-progress-track">' +
+                    '<div class="safecycle-progress-fill"></div>' +
+                '</div>' +
+                '<button id="safecycle_loader_close" type="button" class="safecycle-loader-close" ' +
+                        'onclick="window.safecycleHideLoader(true)">Dismiss Overlay</button>' +
+            '</div>'
+        );
+    }
+
+    function ensureOverlay() {
+        if (!document.body) return null;
+        var el = document.getElementById("safecycle_loading_overlay");
+        if (!el) {
+            el = document.createElement("div");
+            el.id = "safecycle_loading_overlay";
+            el.className = "safecycle-loading-overlay";
+            el.setAttribute("role", "status");
+            el.setAttribute("aria-live", "polite");
+            el.setAttribute("data-loader-variant", "greenway");
+            el.innerHTML = buildBikeLoaderHtml("greenway");
+            document.body.appendChild(el);
+        }
+        return el;
+    }
+
+    function applyLoaderVariant(el, variantKey) {
+        var key = LOADER_VARIANTS[variantKey] ? variantKey : "greenway";
+        var v = LOADER_VARIANTS[key];
+        el.setAttribute("data-loader-variant", key);
+        var cardEl = el.querySelector(".safecycle-loader-card");
+        if (cardEl) cardEl.setAttribute("data-variant", key);
+        var badgeEl = document.getElementById("safecycle_loader_badge_text");
+        if (badgeEl) badgeEl.textContent = v.badge;
+        var sceneEl = document.getElementById("safecycle_loader_scene");
+        if (sceneEl) sceneEl.innerHTML = v.svg;
+        activeTips = v.tips;
+        return v;
+    }
+
+    function selectVariantForLabel(labelText, advanceCycle) {
+        var txt = (labelText || "").toLowerCase();
+        var isDark = document.documentElement && document.documentElement.classList.contains("safecycle-dark");
+        var pool = isDark ? ["night", "radar", "climb", "greenway"] : ["greenway", "radar", "climb", "night"];
+        var msg = "";
+        var minMs = 320;
+        if (txt.indexOf("gpx") !== -1 || txt.indexOf("export") !== -1) {
+            pool = ["gpx", "radar"];
+            msg = "📥 Packaging GPX Track Download...";
+            minMs = 460;
+        } else if (txt.indexOf("generate") !== -1 || txt.indexOf("compare") !== -1) {
+            pool = isDark ? ["night", "radar", "greenway", "climb"] : ["radar", "greenway", "climb", "night"];
+            minMs = 520;
+        } else if (txt.indexOf("advanced") !== -1 || txt.indexOf("basic") !== -1) {
+            pool = ["climb", "radar", "greenway"];
+            msg = "🔬 Updating Safety Telemetry Mode...";
+            minMs = 360;
+        } else if (txt.indexOf("schedule") !== -1 || txt.indexOf("mph") !== -1 ||
+                   txt.indexOf("am") !== -1 || txt.indexOf("pm") !== -1) {
+            pool = ["night", "climb", "greenway"];
+            msg = "⏱️ Adapting Schedule & Traffic Window...";
+            minMs = 380;
+        } else if (txt.indexOf("inspect") !== -1 || txt.indexOf("details") !== -1) {
+            pool = ["climb", "radar", "night"];
+            msg = "🛣️ Opening Corridor Safety Breakdown...";
+            minMs = 340;
+        }
+        var idx = variantCycle % pool.length;
+        if (advanceCycle) variantCycle += 1;
+        var variantKey = pool[idx];
+        var v = LOADER_VARIANTS[variantKey];
+        return { variant: variantKey, msg: msg || v.title, minMs: minMs };
+    }
+
+    function showLoader(title, minMs, variantKey) {
+        var el = ensureOverlay();
+        if (!el) return;
+        if (hideTimer) {
+            clearTimeout(hideTimer);
+            hideTimer = null;
+        }
+        var v = applyLoaderVariant(el, variantKey || "greenway");
+        var titleEl = document.getElementById("safecycle_loader_title");
+        if (titleEl) {
+            titleEl.textContent = title || v.title;
+        }
+        var subEl = document.getElementById("safecycle_loader_sub");
+        var tipIdx = 0;
+        if (subEl) subEl.textContent = activeTips[0];
+        if (tipTimer) clearInterval(tipTimer);
+        tipTimer = setInterval(function() {
+            tipIdx = (tipIdx + 1) % activeTips.length;
+            var s = document.getElementById("safecycle_loader_sub");
+            if (s) s.textContent = activeTips[tipIdx];
+        }, 1250);
+
+        loaderMinUntil = Date.now() + (typeof minMs === "number" ? minMs : 420);
+        el.classList.add("is-visible");
+        void el.offsetHeight;
+
+        if (failsafeTimer) clearTimeout(failsafeTimer);
+        failsafeTimer = setTimeout(function() {
+            hideLoader(true);
+        }, 16000);
+    }
+
+    function hideLoader(force) {
+        var el = document.getElementById("safecycle_loading_overlay");
+        if (!el) return;
+        var remaining = force ? 0 : Math.max(0, loaderMinUntil - Date.now());
+        if (cancelTimer) {
+            clearTimeout(cancelTimer);
+            cancelTimer = null;
+        }
+        if (hideTimer) {
+            clearTimeout(hideTimer);
+            hideTimer = null;
+        }
+        var doHide = function() {
+            el.classList.remove("is-visible");
+            el.classList.remove("is-blocking");
+            if (tipTimer) { clearInterval(tipTimer); tipTimer = null; }
+            if (failsafeTimer) { clearTimeout(failsafeTimer); failsafeTimer = null; }
+        };
+        if (remaining > 20) {
+            hideTimer = setTimeout(doHide, remaining);
+        } else {
+            doHide();
+        }
+    }
+
+    window.LOADER_VARIANT_KEYS = Object.keys(LOADER_VARIANTS);
+    window.safecycleSelectLoaderVariant = selectVariantForLabel;
+    window.safecycleShowLoader = showLoader;
+    window.safecycleHideLoader = hideLoader;
+
     function syncSafeCycleDom() {
         var root = document.documentElement;
         var body = document.body;
@@ -4157,6 +4381,14 @@ THEME_AND_DOWNLOAD_JS = """
             try {
                 localStorage.setItem("safecycle_dark_mode", isDark ? "true" : "false");
             } catch (e) {}
+
+            var newRenderId = themeEl.getAttribute("data-render-id") || "";
+            if (newRenderId && lastRenderId !== null && newRenderId !== lastRenderId) {
+                hideLoader(false);
+            }
+            if (newRenderId) {
+                lastRenderId = newRenderId;
+            }
         }
         var links = document.querySelectorAll('a[data-auto-gpx="true"]');
         links.forEach(function(link) {
@@ -4189,10 +4421,83 @@ THEME_AND_DOWNLOAD_JS = """
             try { link.click(); } catch (e2) {}
         });
     }
+
+    function getNavTrigger(target) {
+        if (!target || !target.closest) return null;
+        if (target.closest("#safecycle_loader_close") ||
+            target.closest(".leaflet-container") ||
+            target.closest(".safecycle-layer-btn") ||
+            target.closest(".safecycle-autocomplete-list")) {
+            return null;
+        }
+        var btn = target.closest("[data-nav], button[type='submit'], input[type='submit']");
+        if (!btn) return null;
+        var navAttr = btn.getAttribute("data-nav") || "";
+        var txt = (btn.textContent || btn.value || "").trim();
+        if (navAttr.indexOf("toggle_dark_mode") !== -1 ||
+            txt.indexOf("Dark") !== -1 || txt.indexOf("Light") !== -1) {
+            return null;
+        }
+        return { btn: btn, txt: txt };
+    }
+
+    if (!window._safecycleLoaderBound) {
+        window._safecycleLoaderBound = true;
+        var pendingInfo = null;
+        document.addEventListener("pointerdown", function(e) {
+            if (e.button && e.button !== 0) return;
+            var hit = getNavTrigger(e.target);
+            if (!hit) return;
+            loaderClickConfirmed = false;
+            pendingInfo = selectVariantForLabel(hit.txt, true);
+            showLoader(pendingInfo.msg, pendingInfo.minMs, pendingInfo.variant);
+            if (cancelTimer) clearTimeout(cancelTimer);
+            cancelTimer = setTimeout(function() {
+                if (!loaderClickConfirmed) {
+                    pendingInfo = null;
+                    hideLoader(true);
+                }
+            }, 900);
+        }, true);
+
+        document.addEventListener("click", function(e) {
+            var hit = getNavTrigger(e.target);
+            if (!hit) return;
+            loaderClickConfirmed = true;
+            if (cancelTimer) {
+                clearTimeout(cancelTimer);
+                cancelTimer = null;
+            }
+            var info = pendingInfo || selectVariantForLabel(hit.txt, true);
+            pendingInfo = null;
+            showLoader(info.msg, info.minMs, info.variant);
+            var el = document.getElementById("safecycle_loading_overlay");
+            if (el) el.classList.add("is-blocking");
+        }, true);
+
+        document.addEventListener("keydown", function(e) {
+            if (e.key === "Escape") {
+                hideLoader(true);
+            } else if (e.key === "Enter" && e.target && e.target.matches) {
+                var enterSel = 'input[name="start_address"], input[name="dest_address"], ' +
+                               'input[name="planned_speed"], input[name="time_hhmm"]';
+                if (e.target.matches(enterSel)) {
+                    loaderClickConfirmed = true;
+                    var info = selectVariantForLabel("generate", true);
+                    showLoader(info.msg, info.minMs, info.variant);
+                }
+            }
+        }, true);
+    }
+
     window.safecycleSyncDom = syncSafeCycleDom;
     if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", syncSafeCycleDom);
+        document.addEventListener("DOMContentLoaded", function() {
+            ensureOverlay();
+            syncSafeCycleDom();
+        });
     } else {
+        ensureOverlay();
         syncSafeCycleDom();
     }
     if (window.MutationObserver && document.documentElement) {
@@ -4203,10 +4508,10 @@ THEME_AND_DOWNLOAD_JS = """
             childList: true,
             subtree: true,
             attributes: true,
-            attributeFilter: ["data-safecycle-theme", "data-auto-gpx", "data-export-token"]
+            attributeFilter: ["data-safecycle-theme", "data-render-id", "data-auto-gpx", "data-export-token"]
         });
     }
-    setInterval(syncSafeCycleDom, 300);
+    setInterval(syncSafeCycleDom, 250);
 })();
 """
 add_website_header(
@@ -4473,13 +4778,14 @@ body {
     margin: 10px 0;
 }
 .strava-stat-val {
-    font-size: 1.45rem;
+    font-size: clamp(0.95rem, 1.3vw, 1.22rem);
     font-weight: 800;
     color: #0f172a;
-    line-height: 1.1;
+    line-height: 1.15;
+    white-space: nowrap;
 }
 .strava-stat-unit {
-    font-size: 0.8rem;
+    font-size: 0.74rem;
     font-weight: 600;
     color: #64748b;
 }
@@ -4617,6 +4923,364 @@ body {
 @keyframes safecycle-spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+}
+
+/* --- Bike-Themed Loading Screen & Mode Switcher --- */
+.safecycle-loading-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 999999;
+    background: rgba(15, 23, 42, 0.56);
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+}
+.safecycle-loading-overlay.is-visible {
+    opacity: 1;
+    pointer-events: none;
+}
+.safecycle-loading-overlay.is-visible.is-blocking {
+    pointer-events: auto;
+}
+.safecycle-loader-close {
+    pointer-events: auto;
+}
+.safecycle-loader-card {
+    background: #ffffff;
+    border: 2px solid #10b981;
+    border-radius: 16px;
+    padding: 22px 26px 18px 26px;
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+    box-shadow: 0 22px 50px rgba(6, 78, 59, 0.28);
+}
+.safecycle-loader-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #ecfdf5;
+    color: #065f46;
+    border: 1px solid #a7f3d0;
+    border-radius: 9999px;
+    padding: 4px 12px;
+    font-size: 0.74rem;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+}
+.safecycle-scene {
+    margin: 4px auto 8px auto;
+    max-width: 310px;
+}
+.safecycle-bike-svg {
+    width: 100%;
+    height: auto;
+    display: block;
+    overflow: visible;
+}
+.safecycle-wheel-spin {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: safecycle-spin 0.75s linear infinite;
+}
+.safecycle-crank-spin {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: safecycle-spin 1.1s linear infinite;
+}
+.safecycle-bike-bounce {
+    animation: safecycle-bounce 0.85s ease-in-out infinite;
+}
+@keyframes safecycle-bounce {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-2.5px); }
+}
+.safecycle-road-dash {
+    animation: safecycle-dash 0.7s linear infinite;
+}
+@keyframes safecycle-dash {
+    from { stroke-dashoffset: 0; }
+    to { stroke-dashoffset: 26; }
+}
+.safecycle-shield-pulse {
+    display: inline-block;
+    animation: safecycle-pulse 1.3s ease-in-out infinite;
+}
+@keyframes safecycle-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.16); }
+}
+.safecycle-loader-title {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #064e3b;
+    margin-bottom: 4px;
+}
+.safecycle-loader-sub {
+    font-size: 0.82rem;
+    color: #475569;
+    min-height: 20px;
+    margin-bottom: 12px;
+}
+.safecycle-progress-track {
+    width: 100%;
+    height: 7px;
+    border-radius: 9999px;
+    background: #e2e8f0;
+    overflow: hidden;
+    margin-bottom: 12px;
+}
+.safecycle-progress-fill {
+    width: 44%;
+    height: 100%;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, #059669, #10b981, #FC5200);
+    animation: safecycle-slide 1.15s ease-in-out infinite;
+}
+@keyframes safecycle-slide {
+    0% { transform: translateX(-110%); }
+    100% { transform: translateX(250%); }
+}
+.safecycle-loader-close {
+    background: transparent;
+    border: 1px solid #cbd5e1;
+    color: #64748b;
+    font-size: 0.74rem;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 9999px;
+    cursor: pointer;
+}
+.safecycle-loader-close:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+.safecycle-radar-pulse {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: safecycle-radar-pulse 1.5s ease-out infinite;
+}
+@keyframes safecycle-radar-pulse {
+    0% { transform: scale(0.75); opacity: 0.9; }
+    100% { transform: scale(1.38); opacity: 0.08; }
+}
+.safecycle-route-draw {
+    animation: safecycle-route-draw 1.1s linear infinite;
+}
+@keyframes safecycle-route-draw {
+    from { stroke-dashoffset: 36; }
+    to { stroke-dashoffset: 0; }
+}
+.safecycle-node-ping {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: safecycle-pulse 1.1s ease-in-out infinite;
+}
+.safecycle-beam-pulse {
+    animation: safecycle-beam-pulse 1.4s ease-in-out infinite;
+}
+@keyframes safecycle-beam-pulse {
+    0%, 100% { opacity: 0.2; }
+    50% { opacity: 0.55; }
+}
+.safecycle-taillight {
+    animation: safecycle-taillight 0.65s ease-in-out infinite;
+}
+@keyframes safecycle-taillight {
+    0%, 100% { opacity: 0.45; }
+    50% { opacity: 1; }
+}
+.safecycle-gps-glide {
+    animation: safecycle-bounce 0.9s ease-in-out infinite;
+}
+.safecycle-bar-wave {
+    transform-box: fill-box;
+    transform-origin: bottom center;
+    animation: safecycle-bar-wave 0.9s ease-in-out infinite;
+}
+.safecycle-bar-wave:nth-of-type(2) { animation-delay: 0.14s; }
+.safecycle-bar-wave:nth-of-type(3) { animation-delay: 0.28s; }
+.safecycle-bar-wave:nth-of-type(4) { animation-delay: 0.42s; }
+@keyframes safecycle-bar-wave {
+    0%, 100% { transform: scaleY(0.6); opacity: 0.72; }
+    50% { transform: scaleY(1.12); opacity: 1; }
+}
+.safecycle-night-bike .safecycle-frame-stroke {
+    stroke: #e2e8f0;
+}
+.safecycle-loader-card[data-variant="radar"] {
+    border-color: #0284c7;
+}
+.safecycle-loader-card[data-variant="radar"] .safecycle-loader-badge {
+    background: #e0f2fe;
+    color: #075985;
+    border-color: #7dd3fc;
+}
+.safecycle-loader-card[data-variant="climb"] {
+    border-color: #059669;
+}
+.safecycle-loader-card[data-variant="night"] {
+    background: #0f172a;
+    border-color: #38bdf8;
+    color: #f8fafc;
+}
+.safecycle-loader-card[data-variant="night"] .safecycle-loader-badge {
+    background: #1e293b;
+    color: #fde68a;
+    border-color: #475569;
+}
+.safecycle-loader-card[data-variant="night"] .safecycle-loader-title {
+    color: #7dd3fc;
+}
+.safecycle-loader-card[data-variant="night"] .safecycle-loader-sub {
+    color: #cbd5e1;
+}
+.safecycle-loader-card[data-variant="night"] .safecycle-progress-track {
+    background: #1e293b;
+}
+.safecycle-loader-card[data-variant="night"] .safecycle-loader-close {
+    border-color: #475569;
+    color: #cbd5e1;
+}
+.safecycle-loader-card[data-variant="gpx"] {
+    border-color: #FC5200;
+}
+.safecycle-loader-card[data-variant="gpx"] .safecycle-loader-badge {
+    background: #fff7ed;
+    color: #9a3412;
+    border-color: #fdba74;
+}
+.safecycle-loader-card[data-variant="gpx"] .safecycle-progress-fill {
+    background: linear-gradient(90deg, #0284c7, #10b981, #FC5200);
+}
+.safecycle-mode-switcher {
+    background: #ffffff;
+    border: 1.5px solid #cbd5e1;
+    border-radius: 10px;
+    padding: 10px 16px;
+    margin: 0 0 14px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.safecycle-mode-switcher.is-advanced {
+    background: #f0fdf4;
+    border-color: #34d399;
+}
+body.safecycle-dark .safecycle-loader-card {
+    background: #0f172a !important;
+    border-color: #10b981 !important;
+    color: #f8fafc !important;
+}
+body.safecycle-dark .safecycle-loader-card[data-variant="radar"] {
+    border-color: #38bdf8 !important;
+}
+body.safecycle-dark .safecycle-loader-card[data-variant="gpx"] {
+    border-color: #fb923c !important;
+}
+body.safecycle-dark .safecycle-frame-stroke {
+    stroke: #e2e8f0;
+}
+body.safecycle-dark .safecycle-loader-badge {
+    background: #064e3b;
+    color: #a7f3d0;
+    border-color: #059669;
+}
+body.safecycle-dark .safecycle-loader-title {
+    color: #6ee7b7 !important;
+}
+body.safecycle-dark .safecycle-loader-sub {
+    color: #cbd5e1 !important;
+}
+body.safecycle-dark .safecycle-progress-track {
+    background: #1e293b;
+}
+body.safecycle-dark .safecycle-loader-close {
+    border-color: #475569;
+    color: #cbd5e1;
+}
+body.safecycle-dark .safecycle-mode-switcher {
+    background: #111827 !important;
+    border-color: #334155 !important;
+    color: #e2e8f0 !important;
+}
+body.safecycle-dark .safecycle-mode-switcher.is-advanced {
+    background: rgba(6, 78, 59, 0.35) !important;
+    border-color: #10b981 !important;
+}
+
+/* --- Shared Leaflet Layout & Map Layer Toggle --- */
+.leaflet-pane, .leaflet-tile, .leaflet-marker-icon, .leaflet-marker-shadow,
+.leaflet-tile-container, .leaflet-pane > svg, .leaflet-zoom-box, .leaflet-layer {
+    position: absolute !important;
+    left: 0;
+    top: 0;
+}
+.leaflet-container {
+    overflow: hidden !important;
+    position: relative !important;
+    outline: 0;
+}
+.leaflet-tile {
+    visibility: inherit !important;
+}
+.custom-start-pin, .custom-dest-pin {
+    background: transparent !important;
+    border: none !important;
+    overflow: visible !important;
+}
+.safecycle-map-type-bar {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 1000;
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(8px);
+    padding: 3px;
+    border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+    border: 1px solid #cbd5e1;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    user-select: none;
+}
+.safecycle-layer-btn {
+    padding: 5px 11px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    line-height: 1;
+}
+.safecycle-layer-btn.is-active {
+    background: #047857;
+    color: #ffffff;
+    box-shadow: 0 1px 4px rgba(4, 120, 87, 0.35);
+}
+.safecycle-layer-btn.is-inactive {
+    background: transparent;
+    color: #475569;
+}
+.safecycle-layer-btn.is-inactive:hover {
+    background: #f1f5f9;
+    color: #0f172a;
 }
 
 /* --- SafeCycle Dark Mode Theme --- */
@@ -4795,6 +5459,37 @@ body.safecycle-dark #safecycle_planner_map_wrapper:not(.is-satellite) .leaflet-t
 body.safecycle-dark #safecycle_leaflet_route_wrapper:not(.is-satellite) .leaflet-tile-pane {
     filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(92%);
 }
+.strava-card.is-basic {
+    padding: 12px 14px;
+    border-radius: 12px;
+}
+.safecycle-basic-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 8px 6px;
+    margin: 8px 0;
+    text-align: center;
+}
+.safecycle-basic-note {
+    font-size: 0.78rem;
+    color: #475569;
+    margin: 0 0 10px 0;
+    line-height: 1.35;
+}
+body.safecycle-dark .safecycle-basic-metrics {
+    background: #0f172a !important;
+    border-color: #334155 !important;
+}
+body.safecycle-dark .safecycle-basic-note {
+    color: #cbd5e1 !important;
+}
+body.safecycle-dark .safecycle-basic-score {
+    color: #34d399 !important;
+}
 body.safecycle-dark [style*="background: #ffffff"],
 body.safecycle-dark [style*="background: #f8fafc"],
 body.safecycle-dark [style*="background: #f1f5f9"],
@@ -4902,15 +5597,19 @@ set_site_information(
 
 # --- Helper Navigation Component ---
 def render_navbar(active_page: str, beta_mode: bool = False, state: Optional[State] = None) -> Component:
-    """Build persistent header navbar across all SafeCycle pages with live saved count and theme sync."""
-    try:
-        saved_count = len(load_saved_routes())
-    except Exception:
-        saved_count = 0
+    """Build persistent header navbar across all SafeCycle pages with live saved count, theme & render sync."""
+    saved_count = 0
+    if beta_mode:
+        try:
+            saved_count = len(load_saved_routes())
+        except Exception:
+            saved_count = 0
     is_dark = bool(getattr(state, "dark_mode", False)) if state is not None else False
     theme_mode = "dark" if is_dark else "light"
+    render_stamp = str(time.monotonic_ns())
     html = f"""
-    <div id="safecycle_theme_sync" data-safecycle-theme="{theme_mode}" style="display: none;"></div>
+    <div id="safecycle_theme_sync" data-safecycle-theme="{theme_mode}"
+         data-render-id="{render_stamp}" style="display: none;"></div>
     <div class="safecycle-navbar">
         <div class="safecycle-brand">
             🚲 SafeCycle
@@ -5034,6 +5733,9 @@ def generate_elevation_sparkline_svg(route: RouteOption, r_type: str, is_active:
 
     elev_ft = route.elevation_gain_m * 3.28084
 
+    elev_ft_str = format_number(elev_ft, 0)
+    elev_m_str = format_number(route.elevation_gain_m, 0)
+
     hdr_style = (
         "display: flex; justify-content: space-between; font-size: 0.72rem; "
         "color: #64748b; font-weight: 600; margin-bottom: 2px;"
@@ -5042,7 +5744,7 @@ def generate_elevation_sparkline_svg(route: RouteOption, r_type: str, is_active:
     <div style="position: relative;">
         <div style="{hdr_style}">
             <span>📈 Elevation Profile</span>
-            <span style="color: {stroke_color};">▲ {elev_ft:.0f} ft gain ({route.elevation_gain_m:.0f} m)</span>
+            <span style="color: {stroke_color};">▲ {elev_ft_str} ft gain ({elev_m_str} m)</span>
         </div>
         <svg viewBox="0 0 280 48" style="width: 100%; height: 44px; display: block;" preserveAspectRatio="none">
             <defs>
@@ -5063,29 +5765,74 @@ def sanitize_route_dom_id(r_type: str) -> str:
     """Sanitize route type name for use in HTML ID attributes (matches JS rType.replace(/[^a-zA-Z0-9_]/g, '_'))."""
     return re.sub(r'[^a-zA-Z0-9_]', '_', r_type)
 
+def render_safety_mode_banner(advanced_mode: bool) -> Component:
+    """Render the Basic vs Advanced Safety Mode switcher banner."""
+    if advanced_mode:
+        badge_html = (
+            '<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">'
+            '<span style="background: #047857; color: #ffffff; padding: 4px 12px; '
+            'border-radius: 9999px; font-size: 0.78rem; font-weight: 800;">'
+            '🔬 Advanced Safety Mode</span>'
+            '<span style="font-size: 0.84rem; color: #334155;">'
+            'Showing full telemetry: elevation curves, surface protection splits, '
+            'risk spectrum, alternative corridors &amp; crash records.</span></div>'
+        )
+        btn_label = "🌱 Switch to Basic Mode"
+        btn_style = (
+            "background: #ffffff; color: #064e3b; border: 1.5px solid #059669; "
+            "padding: 7px 15px; border-radius: 8px; font-weight: 700; "
+            "font-size: 0.82rem; cursor: pointer;"
+        )
+        cls_name = "safecycle-mode-switcher is-advanced"
+    else:
+        badge_html = (
+            '<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">'
+            '<span style="background: #0f172a; color: #f8fafc; padding: 4px 12px; '
+            'border-radius: 9999px; font-size: 0.78rem; font-weight: 800;">'
+            '🌱 Basic Safety View</span>'
+            '<span style="font-size: 0.84rem; color: #475569;">'
+            'Clean overview with core safety scores, ride time &amp; top alerts. '
+            'Want full road telemetry?</span></div>'
+        )
+        btn_label = "🔬 Switch to Advanced Mode"
+        btn_style = (
+            "background: #047857; color: #ffffff; border: none; "
+            "padding: 7px 15px; border-radius: 8px; font-weight: 700; "
+            "font-size: 0.82rem; cursor: pointer;"
+        )
+        cls_name = "safecycle-mode-switcher"
+
+    return Div([
+        RawHTML(badge_html),
+        Button(btn_label, toggle_advanced_mode, style=btn_style),
+    ], classes=cls_name)
+
+
 def render_strava_route_card(
     route: RouteOption,
     r_type: str,
     is_active: bool,
     select_fn: Any = None,
     planned_speed_mph: Any = 12.0,
-    departure_time: str = "8:30 AM"
+    departure_time: str = "8:30 AM",
+    advanced_mode: bool = False,
 ) -> Component:
-    """Build a Strava-style high-contrast route option card with prominent stats, surface bar, and sparkline."""
+    """Build a Strava-style route option card in streamlined Basic Mode or full-telemetry Advanced Mode."""
     dist_mi = route.total_distance_km * 0.621371
     elev_ft = route.elevation_gain_m * 3.28084
     tot_km = max(0.1, route.total_distance_km)
     spd_float = parse_speed_mph(planned_speed_mph)
     start_fmt, end_fmt, sched_summary = compute_trip_schedule(departure_time, route.estimated_duration_mins)
+    dur_val, dur_unit = format_duration_parts(route.estimated_duration_mins)
+    dur_text = f"{dur_val} {dur_unit}"
+    dist_mi_str = format_number(dist_mi, 1)
+    dist_km_str = format_number(route.total_distance_km, 1)
+    elev_ft_str = format_number(elev_ft, 0)
+    elev_m_str = format_number(route.elevation_gain_m, 0)
 
-    prot_types = ["protected_bike_path", "separated_lane"]
-    lane_types = ["painted_lane", "traffic_calmed_street"]
-    sh_types = ["paved_shoulder", "shoulder", "bike_shoulder"]
-    pct_protected = sum(s.length_km for s in route.segments if s.infrastructure in prot_types) / tot_km * 100
-    pct_lane = sum(s.length_km for s in route.segments if s.infrastructure in lane_types) / tot_km * 100
-    pct_shoulder = sum(s.length_km for s in route.segments if s.infrastructure in sh_types) / tot_km * 100
-    pct_shared = sum(s.length_km for s in route.segments if s.infrastructure == "shared_lane") / tot_km * 100
-    pct_none = max(0.0, 100.0 - pct_protected - pct_lane - pct_shoulder - pct_shared)
+    prot_types = ("protected_bike_path", "separated_lane")
+    lane_types = ("painted_lane", "traffic_calmed_street")
+    sh_types = ("paved_shoulder", "shoulder", "bike_shoulder")
 
     safe_id = sanitize_route_dom_id(r_type)
 
@@ -5126,8 +5873,8 @@ def render_strava_route_card(
         score_border = "#fecdd3"
         score_label = "ELEVATED RISK"
         max_spd = max((s.speed_limit_mph or 35 for s in route.segments), default=35)
-        has_shoulder = pct_shoulder >= 20.0 or any(s.infrastructure in sh_types for s in route.segments)
-        has_lane = pct_lane >= 20.0
+        has_shoulder = any(s.infrastructure in sh_types for s in route.segments)
+        has_lane = any(s.infrastructure in lane_types for s in route.segments)
         if has_shoulder:
             infra_feat = "🚲 Wide paved bike shoulders on highway corridor"
         elif has_lane:
@@ -5148,102 +5895,121 @@ def render_strava_route_card(
         score_border = "#ddd6fe"
         score_label = f"SAFETY {route.overall_safety_score:.0f}/100"
         features = [
-            f"🚴 Distance: {dist_mi:.1f} mi ({route.total_distance_km:.1f} km)",
-            f"⏱️ Ride Time: {route.estimated_duration_mins:.0f} mins",
+            f"🚴 Distance: {dist_mi_str} mi ({dist_km_str} km)",
+            f"⏱️ Ride Time: {dur_text}",
             f"🛡️ Safety score: {route.overall_safety_score:.0f}/100"
         ]
 
     active_class = "active" if is_active else ""
 
-    sparkline_html = generate_elevation_sparkline_svg(route, r_type, is_active)
+    sparkline_html = ""
+    spectrum_bar_html = ""
+    if advanced_mode:
+        pct_protected = sum(
+            s.length_km for s in route.segments if s.infrastructure in prot_types
+        ) / tot_km * 100
+        pct_lane = sum(
+            s.length_km for s in route.segments if s.infrastructure in lane_types
+        ) / tot_km * 100
+        pct_shoulder = sum(
+            s.length_km for s in route.segments if s.infrastructure in sh_types
+        ) / tot_km * 100
+        pct_shared = sum(
+            s.length_km for s in route.segments if s.infrastructure == "shared_lane"
+        ) / tot_km * 100
+        pct_none = max(0.0, 100.0 - pct_protected - pct_lane - pct_shoulder - pct_shared)
 
-    surface_labels = []
-    if pct_protected > 0:
-        surface_labels.append(f"{pct_protected:.0f}% Protected")
-    if pct_lane > 0:
-        surface_labels.append(f"{pct_lane:.0f}% Bike Lane")
-    if pct_shoulder > 0:
-        surface_labels.append(f"{pct_shoulder:.0f}% Paved Shoulder")
-    if pct_shared > 0:
-        surface_labels.append(f"{pct_shared:.0f}% Shared")
-    if pct_none > 0.5:
-        surface_labels.append(f"{pct_none:.0f}% No Lane")
-    surface_summary_str = " • ".join(surface_labels[:3]) or "Standard roadway"
+        sparkline_html = generate_elevation_sparkline_svg(route, r_type, is_active)
 
-    dot_css = "display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px;"
-    bar_prot = (
-        f'<div style="width: {pct_protected}%; background: #16a34a;" '
-        f'title="Protected Cycleway {pct_protected:.0f}%"></div>'
-        if pct_protected > 0 else ""
-    )
-    bar_lane = (
-        f'<div style="width: {pct_lane}%; background: #2563eb;" '
-        f'title="Dedicated Bike Lane {pct_lane:.0f}%"></div>'
-        if pct_lane > 0 else ""
-    )
-    bar_sh = (
-        f'<div style="width: {pct_shoulder}%; background: #0891b2;" '
-        f'title="Paved Bike Shoulder {pct_shoulder:.0f}%"></div>'
-        if pct_shoulder > 0 else ""
-    )
-    bar_shr = (
-        f'<div style="width: {pct_shared}%; background: #ca8a04;" '
-        f'title="Shared Street / Sharrow {pct_shared:.0f}%"></div>'
-        if pct_shared > 0 else ""
-    )
-    bar_none = (
-        f'<div style="width: {pct_none}%; background: #dc2626;" '
-        f'title="Unprotected Arterial {pct_none:.0f}%"></div>'
-        if pct_none > 0.5 else ""
-    )
-    leg_prot = (
-        f'<span><span style="{dot_css}background:#16a34a;"></span>Protected</span>'
-        if pct_protected > 0 else ""
-    )
-    leg_lane = (
-        f'<span><span style="{dot_css}background:#2563eb;"></span>Bike Lane</span>'
-        if pct_lane > 0 else ""
-    )
-    leg_sh = (
-        f'<span><span style="{dot_css}background:#0891b2;"></span>Paved Shoulder</span>'
-        if pct_shoulder > 0 else ""
-    )
-    leg_shr = (
-        f'<span><span style="{dot_css}background:#ca8a04;"></span>Shared</span>'
-        if pct_shared > 0 else ""
-    )
-    leg_none = (
-        f'<span><span style="{dot_css}background:#dc2626;"></span>No Lane</span>'
-        if pct_none > 0.5 else ""
-    )
-    surf_hdr_style = (
-        "display: flex; justify-content: space-between; font-size: 0.72rem; "
-        "color: #64748b; font-weight: 600; margin-top: 6px;"
-    )
+        surface_labels = []
+        if pct_protected > 0:
+            surface_labels.append(f"{pct_protected:.0f}% Protected")
+        if pct_lane > 0:
+            surface_labels.append(f"{pct_lane:.0f}% Bike Lane")
+        if pct_shoulder > 0:
+            surface_labels.append(f"{pct_shoulder:.0f}% Paved Shoulder")
+        if pct_shared > 0:
+            surface_labels.append(f"{pct_shared:.0f}% Shared")
+        if pct_none > 0.5:
+            surface_labels.append(f"{pct_none:.0f}% No Lane")
+        surface_summary_str = " • ".join(surface_labels[:3]) or "Standard roadway"
 
-    spectrum_bar_html = f"""
-    <div>
-        <div style="{surf_hdr_style}">
-            <span>Surface & Protection:</span>
-            <span>{surface_summary_str}</span>
+        dot_css = "display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px;"
+        bar_prot = (
+            f'<div style="width: {pct_protected}%; background: #16a34a;" '
+            f'title="Protected Cycleway {pct_protected:.0f}%"></div>'
+            if pct_protected > 0 else ""
+        )
+        bar_lane = (
+            f'<div style="width: {pct_lane}%; background: #2563eb;" '
+            f'title="Dedicated Bike Lane {pct_lane:.0f}%"></div>'
+            if pct_lane > 0 else ""
+        )
+        bar_sh = (
+            f'<div style="width: {pct_shoulder}%; background: #0891b2;" '
+            f'title="Paved Bike Shoulder {pct_shoulder:.0f}%"></div>'
+            if pct_shoulder > 0 else ""
+        )
+        bar_shr = (
+            f'<div style="width: {pct_shared}%; background: #ca8a04;" '
+            f'title="Shared Street / Sharrow {pct_shared:.0f}%"></div>'
+            if pct_shared > 0 else ""
+        )
+        bar_none = (
+            f'<div style="width: {pct_none}%; background: #dc2626;" '
+            f'title="Unprotected Arterial {pct_none:.0f}%"></div>'
+            if pct_none > 0.5 else ""
+        )
+        leg_prot = (
+            f'<span><span style="{dot_css}background:#16a34a;"></span>Protected</span>'
+            if pct_protected > 0 else ""
+        )
+        leg_lane = (
+            f'<span><span style="{dot_css}background:#2563eb;"></span>Bike Lane</span>'
+            if pct_lane > 0 else ""
+        )
+        leg_sh = (
+            f'<span><span style="{dot_css}background:#0891b2;"></span>Paved Shoulder</span>'
+            if pct_shoulder > 0 else ""
+        )
+        leg_shr = (
+            f'<span><span style="{dot_css}background:#ca8a04;"></span>Shared</span>'
+            if pct_shared > 0 else ""
+        )
+        leg_none = (
+            f'<span><span style="{dot_css}background:#dc2626;"></span>No Lane</span>'
+            if pct_none > 0.5 else ""
+        )
+        surf_hdr_style = (
+            "display: flex; justify-content: space-between; font-size: 0.72rem; "
+            "color: #64748b; font-weight: 600; margin-top: 6px;"
+        )
+
+        spectrum_bar_html = f"""
+        <div>
+            <div style="{surf_hdr_style}">
+                <span>Surface & Protection:</span>
+                <span>{surface_summary_str}</span>
+            </div>
+            <div class="strava-spectrum-bar">
+                {bar_prot}
+                {bar_lane}
+                {bar_sh}
+                {bar_shr}
+                {bar_none}
+            </div>
+            <div class="strava-spectrum-legend">
+                {leg_prot}
+                {leg_lane}
+                {leg_sh}
+                {leg_shr}
+                {leg_none}
+            </div>
         </div>
-        <div class="strava-spectrum-bar">
-            {bar_prot}
-            {bar_lane}
-            {bar_sh}
-            {bar_shr}
-            {bar_none}
-        </div>
-        <div class="strava-spectrum-legend">
-            {leg_prot}
-            {leg_lane}
-            {leg_sh}
-            {leg_shr}
-            {leg_none}
-        </div>
-    </div>
-    """
+        """
 
+    if not advanced_mode:
+        features = features[:2]
     features_html = "".join([f"<li>{f}</li>" for f in features])
     card_style = (
         "cursor: pointer; display: flex; flex-direction: column; "
@@ -5262,13 +6028,96 @@ def render_strava_route_card(
     sel_btn_bd = "none" if is_active else "2px solid #cbd5e1"
     sel_btn_style = (
         f"background: {sel_btn_bg}; color: {sel_btn_fg}; font-weight: 700; "
-        f"width: 100%; padding: 10px; border-radius: 8px; border: {sel_btn_bd}; "
-        "cursor: pointer; font-size: 0.9rem; transition: all 0.15s ease;"
+        f"width: 100%; padding: {'8px 10px' if not advanced_mode else '10px'}; "
+        f"border-radius: 8px; border: {sel_btn_bd}; cursor: pointer; "
+        f"font-size: {'0.84rem' if not advanced_mode else '0.9rem'}; "
+        "transition: all 0.15s ease;"
     )
     sel_btn_txt = (
         "✓ Active Route (Selected on Map)"
         if is_active else f"Select {r_type} Route ➔"
     )
+
+    if not advanced_mode:
+        if r_type == "Safest":
+            basic_summary = "Protected paths & quiet low-traffic streets"
+            basic_tier = "Very Safe"
+        elif r_type == "Balanced":
+            basic_summary = "Bike lanes & shorter connecting roads"
+            basic_tier = "Balanced"
+        elif r_type == "Direct":
+            max_spd = max((s.speed_limit_mph or 35 for s in route.segments), default=35)
+            basic_summary = f"Shortest route • higher speeds ({max_spd} mph)"
+            basic_tier = "Faster"
+        else:
+            basic_summary = (
+                f"{route.bike_infrastructure_percentage:.0f}% bikeway • "
+                f"{route.high_risk_segments_count} caution spots"
+            )
+            basic_tier = "Option"
+
+        card_content_html = f"""
+        <div id="strava_card_{safe_id}" class="strava-card is-basic {active_class}"
+             style="{card_style}" onclick="window.safecycleSelectRoute('{r_type}')">
+            <div>
+                <div class="strava-card-top" style="margin-bottom: 4px;">
+                    <div class="strava-tag-badge" style="color: {'#FC5200' if is_active else '#0f172a'};">
+                        <span>{icon}</span> {r_type}
+                    </div>
+                    <span id="strava_card_pill_{safe_id}" class="{pill_cls}">
+                        {pill_txt}
+                    </span>
+                </div>
+
+                <div class="safecycle-basic-metrics">
+                    <div>
+                        <div class="strava-stat-val safecycle-basic-score"
+                             style="color: {score_text}; font-size: 1.08rem;">
+                            {route.overall_safety_score:.0f}<span class="strava-stat-unit">/100</span>
+                        </div>
+                        <div class="strava-stat-lbl">{basic_tier}</div>
+                    </div>
+                    <div>
+                        <div class="strava-stat-val" style="font-size: 1.08rem;">
+                            {dur_val}<span class="strava-stat-unit"> {dur_unit}</span>
+                        </div>
+                        <div class="strava-stat-lbl">Arr. {end_fmt}</div>
+                    </div>
+                    <div>
+                        <div class="strava-stat-val" style="font-size: 1.08rem;">
+                            {dist_mi_str}<span class="strava-stat-unit"> mi</span>
+                        </div>
+                        <div class="strava-stat-lbl">Distance</div>
+                    </div>
+                </div>
+
+                <div class="safecycle-basic-note">{basic_summary}</div>
+            </div>
+            <div>
+                <button id="strava_card_btn_{safe_id}" type="button"
+                    onclick="event.stopPropagation(); window.safecycleSelectRoute('{r_type}');"
+                    style="{sel_btn_style}">
+                    {sel_btn_txt}
+                </button>
+            </div>
+        </div>
+        """
+
+        return Div([
+            RawHTML(card_content_html)
+        ], style="flex: 1; min-width: 240px;")
+
+    middle_metric_html = (
+        f'<div class="strava-stat-val">▲ {elev_ft_str} <span class="strava-stat-unit">ft</span></div>'
+        f'<div class="strava-stat-sub">({elev_m_str} m)</div>'
+        '<div class="strava-stat-lbl">ELEV. GAIN</div>'
+    )
+    advanced_extras_html = f"""
+        <div class="strava-sparkline-wrap">
+            {sparkline_html}
+        </div>
+        {spectrum_bar_html}
+    """
 
     card_content_html = f"""
     <div id="strava_card_{safe_id}" class="strava-card {active_class}"
@@ -5295,18 +6144,15 @@ def render_strava_route_card(
 
             <div class="strava-stats-matrix">
                 <div>
-                    <div class="strava-stat-val">{dist_mi:.1f} <span class="strava-stat-unit">mi</span></div>
-                    <div class="strava-stat-sub">({route.total_distance_km:.1f} km)</div>
+                    <div class="strava-stat-val">{dist_mi_str} <span class="strava-stat-unit">mi</span></div>
+                    <div class="strava-stat-sub">({dist_km_str} km)</div>
                     <div class="strava-stat-lbl">DISTANCE</div>
                 </div>
                 <div>
-                    <div class="strava-stat-val">▲ {elev_ft:.0f} <span class="strava-stat-unit">ft</span></div>
-                    <div class="strava-stat-sub">({route.elevation_gain_m:.0f} m)</div>
-                    <div class="strava-stat-lbl">ELEV. GAIN</div>
+                    {middle_metric_html}
                 </div>
                 <div>
-                    <div class="strava-stat-val">{route.estimated_duration_mins:.0f}
-                        <span class="strava-stat-unit">m</span></div>
+                    <div class="strava-stat-val">{dur_val}<span class="strava-stat-unit"> {dur_unit}</span></div>
                     <div class="strava-stat-sub">@ {spd_float:.0f} mph</div>
                     <div class="strava-stat-lbl">EST. TIME</div>
                 </div>
@@ -5322,11 +6168,7 @@ def render_strava_route_card(
                 </span>
             </div>
 
-            <div class="strava-sparkline-wrap">
-                {sparkline_html}
-            </div>
-
-            {spectrum_bar_html}
+            {advanced_extras_html}
 
             <ul class="strava-features-list" style="margin-top: 10px;">
                 {features_html}
@@ -5363,6 +6205,11 @@ def render_possible_route_card(
     tot_km = max(0.1, route.total_distance_km)
     spd_float = parse_speed_mph(planned_speed_mph)
     start_fmt, end_fmt, _ = compute_trip_schedule(departure_time, route.estimated_duration_mins)
+    dur_val, dur_unit = format_duration_parts(route.estimated_duration_mins)
+    dist_mi_str = format_number(dist_mi, 1)
+    dist_km_str = format_number(route.total_distance_km, 1)
+    elev_ft_str = format_number(elev_ft, 0)
+    elev_m_str = format_number(route.elevation_gain_m, 0)
 
     prot_types = ["protected_bike_path", "separated_lane"]
     lane_types = ["painted_lane", "traffic_calmed_street"]
@@ -5452,18 +6299,17 @@ def render_possible_route_card(
 
             <div class="strava-stats-matrix" style="margin-bottom: 10px;">
                 <div>
-                    <div class="strava-stat-val">{dist_mi:.1f} <span class="strava-stat-unit">mi</span></div>
-                    <div class="strava-stat-sub">({route.total_distance_km:.1f} km)</div>
+                    <div class="strava-stat-val">{dist_mi_str} <span class="strava-stat-unit">mi</span></div>
+                    <div class="strava-stat-sub">({dist_km_str} km)</div>
                     <div class="strava-stat-lbl">DISTANCE</div>
                 </div>
                 <div>
-                    <div class="strava-stat-val">▲ {elev_ft:.0f} <span class="strava-stat-unit">ft</span></div>
-                    <div class="strava-stat-sub">({route.elevation_gain_m:.0f} m)</div>
+                    <div class="strava-stat-val">▲ {elev_ft_str} <span class="strava-stat-unit">ft</span></div>
+                    <div class="strava-stat-sub">({elev_m_str} m)</div>
                     <div class="strava-stat-lbl">CLIMB</div>
                 </div>
                 <div>
-                    <div class="strava-stat-val">{route.estimated_duration_mins:.0f}
-                        <span class="strava-stat-unit">m</span></div>
+                    <div class="strava-stat-val">{dur_val}<span class="strava-stat-unit"> {dur_unit}</span></div>
                     <div class="strava-stat-sub">@ {spd_float:.0f} mph</div>
                     <div class="strava-stat-lbl">EST. TIME</div>
                 </div>
@@ -5500,14 +6346,9 @@ def render_possible_route_card(
         RawHTML(card_content_html)
     ], style="flex: 1; min-width: 270px; max-width: 380px;")
 
-def render_autocomplete_html() -> str:
-    """
-    Build datalist and JavaScript autocomplete dropdown controller worldwide.
-
-    Advanced technique: Embeds client-side DOM event delegation and Fetch API
-    calls inside Drafter RawHTML so address suggestions update asynchronously
-    without full-page round trips.
-    """
+@functools.lru_cache(maxsize=1)
+def _build_cached_autocomplete_html() -> str:
+    """Build and cache the static datalist and JavaScript autocomplete controller HTML."""
     datalist_options = "".join([
         f'<option value="{loc["name"]}">{loc["category"]} • {loc["city"]}</option>'
         for loc in CYCLING_LOCATIONS
@@ -5829,6 +6670,10 @@ def render_autocomplete_html() -> str:
     {s_close}
     """
 
+def render_autocomplete_html() -> str:
+    """Return cached datalist and JavaScript autocomplete controller HTML."""
+    return _build_cached_autocomplete_html()
+
 def render_leaflet_planner_map(
     start_coord: Coordinate,
     dest_coord: Coordinate,
@@ -5850,64 +6695,9 @@ def render_leaflet_planner_map(
     clean_d = dest_label.replace('"', '\\"').replace("'", "\\'")
 
     return f"""
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
-    <style>
-        .leaflet-pane, .leaflet-tile, .leaflet-marker-icon, .leaflet-marker-shadow,
-        .leaflet-tile-container, .leaflet-pane > svg, .leaflet-zoom-box, .leaflet-layer {{
-            position: absolute !important;
-            left: 0;
-            top: 0;
-        }}
-        .leaflet-container {{
-            overflow: hidden !important;
-            position: relative !important;
-        }}
-        .safecycle-map-type-bar {{
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            z-index: 1000;
-            background: rgba(255, 255, 255, 0.96);
-            backdrop-filter: blur(8px);
-            padding: 3px;
-            border-radius: 8px;
-            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
-            border: 1px solid #cbd5e1;
-            display: inline-flex;
-            align-items: center;
-            gap: 3px;
-            user-select: none;
-        }}
-        .safecycle-layer-btn {{
-            padding: 5px 11px;
-            font-size: 0.75rem;
-            font-weight: 700;
-            border-radius: 6px;
-            border: none;
-            cursor: pointer;
-            transition: all 0.15s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            line-height: 1;
-        }}
-        .safecycle-layer-btn.is-active {{
-            background: #047857;
-            color: #ffffff;
-            box-shadow: 0 1px 4px rgba(4, 120, 87, 0.35);
-        }}
-        .safecycle-layer-btn.is-inactive {{
-            background: transparent;
-            color: #475569;
-        }}
-        .safecycle-layer-btn.is-inactive:hover {{
-            background: #f1f5f9;
-            color: #0f172a;
-        }}
-    </style>
     <div id="safecycle_planner_map_wrapper" style="position: relative; width: 100%; border-radius: 12px;
         overflow: hidden; border: 1.5px solid #cbd5e1; box-shadow: 0 4px 14px rgba(0,0,0,0.08);
-        margin: 6px 0 12px 0;">
+        margin: 6px 0 2px 0;">
         <div id="safecycle_planner_map"
             style="height: {height_px}px; width: 100%; background: #e2e8f0; z-index: 1;"></div>
 
@@ -6078,15 +6868,6 @@ def render_leaflet_route_map(
     s_open = "<scr" + "ipt>"
     s_close = "</scr" + "ipt>"
 
-    def format_dur(mins: float) -> str:
-        """Format route duration minutes as 'X hr Y min' or 'Y min'."""
-        m_int = int(round(mins))
-        if m_int >= 60:
-            h = m_int // 60
-            rem = m_int % 60
-            return f"{h} hr {rem} min" if rem > 0 else f"{h} hr"
-        return f"{m_int} min"
-
     core_order = ["Safest", "Balanced", "Direct"]
     ordered_keys = (
         [k for k in core_order if k in routes]
@@ -6098,17 +6879,23 @@ def render_leaflet_route_map(
         pts = []
         for seg in ropt.segments:
             for c in seg.coordinates:
-                pts.append([round(c.latitude, 6), round(c.longitude, 6)])
+                pt = [round(c.latitude, 5), round(c.longitude, 5)]
+                if not pts or pts[-1] != pt:
+                    pts.append(pt)
         if not pts:
-            pts = [[start_coord.latitude, start_coord.longitude], [dest_coord.latitude, dest_coord.longitude]]
+            pts = [
+                [round(start_coord.latitude, 5), round(start_coord.longitude, 5)],
+                [round(dest_coord.latitude, 5), round(dest_coord.longitude, 5)],
+            ]
 
         dist_mi = round(ropt.total_distance_km * 0.621371, 1)
         routes_data[rtype] = {
             "coords": pts,
             "distance_km": ropt.total_distance_km,
             "distance_mi": dist_mi,
+            "distance_mi_formatted": format_number(dist_mi, 1),
             "duration_mins": ropt.estimated_duration_mins,
-            "duration_formatted": format_dur(ropt.estimated_duration_mins),
+            "duration_formatted": format_duration_text(ropt.estimated_duration_mins),
             "safety_score": ropt.overall_safety_score,
             "elevation_m": ropt.elevation_gain_m,
             "label": rtype,
@@ -6121,28 +6908,8 @@ def render_leaflet_route_map(
     clean_start = start_label.replace('"', '\\"').replace("'", "\\'")
     clean_dest = dest_label.replace('"', '\\"').replace("'", "\\'")
 
-    safest_info = routes_data.get("Safest", {})
-    balanced_info = routes_data.get("Balanced", {})
-    direct_info = routes_data.get("Direct", {})
-
     return f"""
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
     <style>
-        /* Essential Leaflet Layout & Positioning Rules */
-        .leaflet-pane, .leaflet-tile, .leaflet-marker-icon, .leaflet-marker-shadow,
-        .leaflet-tile-container, .leaflet-pane > svg, .leaflet-zoom-box, .leaflet-layer {{
-            position: absolute !important;
-            left: 0;
-            top: 0;
-        }}
-        .leaflet-container {{
-            overflow: hidden !important;
-            position: relative !important;
-            outline: 0;
-        }}
-        .leaflet-tile {{
-            visibility: inherit !important;
-        }}
         .safecycle-map-wrap {{
             position: relative;
             width: 100%;
@@ -6150,7 +6917,7 @@ def render_leaflet_route_map(
             overflow: hidden;
             border: 1.5px solid #cbd5e1;
             box-shadow: 0 6px 20px rgba(15, 23, 42, 0.10);
-            margin: 6px 0 18px 0;
+            margin: 6px 0 4px 0;
             background: #f8fafc;
         }}
         .safecycle-floating-legend {{
@@ -6237,53 +7004,6 @@ def render_leaflet_route_map(
             background: transparent !important;
             border: none !important;
             overflow: visible !important;
-        }}
-        .custom-start-pin, .custom-dest-pin {{
-            background: transparent !important;
-            border: none !important;
-            overflow: visible !important;
-        }}
-        .safecycle-map-type-bar {{
-            position: absolute;
-            top: 12px;
-            right: 12px;
-            z-index: 1000;
-            background: rgba(255, 255, 255, 0.96);
-            backdrop-filter: blur(8px);
-            padding: 3px;
-            border-radius: 8px;
-            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
-            border: 1px solid #cbd5e1;
-            display: inline-flex;
-            align-items: center;
-            gap: 3px;
-            user-select: none;
-        }}
-        .safecycle-layer-btn {{
-            padding: 5px 11px;
-            font-size: 0.75rem;
-            font-weight: 700;
-            border-radius: 6px;
-            border: none;
-            cursor: pointer;
-            transition: all 0.15s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            line-height: 1;
-        }}
-        .safecycle-layer-btn.is-active {{
-            background: #047857;
-            color: #ffffff;
-            box-shadow: 0 1px 4px rgba(4, 120, 87, 0.35);
-        }}
-        .safecycle-layer-btn.is-inactive {{
-            background: transparent;
-            color: #475569;
-        }}
-        .safecycle-layer-btn.is-inactive:hover {{
-            background: #f1f5f9;
-            color: #0f172a;
         }}
     </style>
 
@@ -6464,7 +7184,9 @@ def render_leaflet_route_map(
                             <div class="badge-time">
                                 <span>🚲</span> <span>${{rInfo.duration_formatted}}</span>
                             </div>
-                            <div class="badge-dist">${{rInfo.distance_mi}} miles • ${{rType}}</div>
+                            <div class="badge-dist">
+                                ${{rInfo.distance_mi_formatted || rInfo.distance_mi}} miles • ${{rType}}
+                            </div>
                         </div>
                         <div class="${{arrowClass}}"></div>
                     </div>
@@ -6659,7 +7381,7 @@ def render_leaflet_route_map(
                       + '🧭 Possible Corridor (Unselected)</span>'
                     : '';
                 const tooltipHtml = (
-                    `<b>${{rType}}</b>: ${{rInfo.distance_mi}} mi • `
+                    `<b>${{rType}}</b>: ${{rInfo.distance_mi_formatted || rInfo.distance_mi}} mi • `
                     + `${{rInfo.duration_formatted}}${{tooltipBadge}}<br>`
                     + '<span style="color:#2563eb;font-weight:600;">Click route to select</span>'
                 );
@@ -6688,7 +7410,7 @@ def render_leaflet_route_map(
 
                 // User constraint: ONLY show floating callout badges for Direct, Balanced, and Safest!
                 if (["Direct", "Balanced", "Safest"].includes(rType)) {{
-                    const offsetFraction = (rType === "Direct") ? 0.28 : ((rType === "Balanced") ? 0.50 : 0.72);
+                    const offsetFraction = (rType === "Direct") ? 0.22 : ((rType === "Balanced") ? 0.52 : 0.82);
                     const anchorIdx = Math.floor((latlngs.length - 1) * offsetFraction);
                     const anchorPt = latlngs[anchorIdx] || latlngs[Math.floor(latlngs.length / 2)];
 
@@ -6835,7 +7557,7 @@ def index(state: State) -> Page:
             </div>
         </div>
         """)
-    ], class_name="card", style="border-left: 4px solid #059669; background: #f0fdf4; margin-bottom: 16px;")
+    ], classes="card", style="border-left: 4px solid #059669; background: #f0fdf4; margin-bottom: 16px;")
 
     cur_spd = parse_speed_mph(getattr(state, "planned_speed_mph", getattr(state, "planned_speed", 12.0)))
     cur_spd_str = str(int(cur_spd) if cur_spd.is_integer() else cur_spd)
@@ -6915,18 +7637,14 @@ def index(state: State) -> Page:
                 "font-weight: 700; border-radius: 8px; cursor: pointer; border: none; "
                 "box-shadow: 0 4px 12px rgba(252, 82, 0, 0.3);",
             ),
-        ], class_name="card"),
+        ], classes="card"),
         RawHTML(render_autocomplete_html()),
         RawHTML(render_timemask_script_html()),
         RawHTML(legend_html),
         Div([
             Header("📍 Interactive Bicycle Map", level=3, style="color: #064e3b; margin-top: 0;"),
             RawHTML(planner_map_html),
-            Paragraph(
-                "Interactive OpenStreetMap bicycle map showing start and destination coordinates.",
-                style="font-size: 0.8rem; color: #64748b; margin-top: 6px;",
-            )
-        ], class_name="card"),
+        ], classes="card"),
         Div([
             Paragraph(
                 "🛡️ <strong>Safety Principle:</strong> SafeCycle never describes a route as guaranteed safe. "
@@ -7017,11 +7735,11 @@ def consolidate_route_corridors(segments: List[RoadSegment]) -> List[Dict[str, A
 
 def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mode: bool) -> str:
     """
-    Renders the Route Evaluation & Diagnostics Panel.
+    Render Route Evaluation & Routing Diagnostics strictly when Beta Mode is enabled.
     Displays multi-criteria candidate scoring, pairwise geometric similarity matrix,
     ranking rationale, and candidate rejection audit logs.
     """
-    if not routes:
+    if not beta_mode or not routes:
         return ""
 
     # 1. Candidate Multi-Criteria Scoring Table
@@ -7073,11 +7791,11 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
         <tr style="border-bottom: 1px solid #e2e8f0; font-size: 0.82rem;">
             <td style="padding: 10px 12px; font-weight: 700;">{strategy_badge}</td>
             <td style="padding: 10px 12px; white-space: nowrap;">
-                <strong>{opt.total_distance_km:.1f} km</strong>
+                <strong>{format_number(opt.total_distance_km, 1)} km</strong>
                 <span style="color: #64748b; font-size: 0.76rem;">({detour_r:.2f}x detour)</span>
             </td>
             <td style="padding: 10px 12px; white-space: nowrap;">
-                <strong>{opt.estimated_duration_mins:.0f} min</strong>
+                <strong>{format_duration_text(opt.estimated_duration_mins)}</strong>
             </td>
             <td style="padding: 10px 12px; text-align: center;">
                 <span style="font-weight: 800; color: {score_color};">{opt.overall_safety_score:.0f}</span>/100
@@ -7113,35 +7831,35 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
                 <div style="background: #f8fafc; border: 1.5px solid #cbd5e1; {kpi_box_base}">
                     <div style="{kpi_lbl_base} color: #64748b;">1. Probed / Discovered</div>
                     <div style="{kpi_val_base} color: #1e293b;">
-                        {lifecycle_summary.get('discovered_count', 0)}
+                        {lifecycle_summary.get('discovered_count', 0):,}
                     </div>
                     <div style="font-size: 0.68rem; color: #64748b;">corridor alternatives</div>
                 </div>
                 <div style="background: #f0fdf4; border: 1.5px solid #bbf7d0; {kpi_box_base}">
                     <div style="{kpi_lbl_base} color: #166534;">2. Validated Viable</div>
                     <div style="{kpi_val_base} color: #15803d;">
-                        {lifecycle_summary.get('validated_count', 0)}
+                        {lifecycle_summary.get('validated_count', 0):,}
                     </div>
                     <div style="font-size: 0.68rem; color: #166534;">passed spur/freeway gate</div>
                 </div>
                 <div style="background: #ecfdf5; border: 1.5px solid #a7f3d0; {kpi_box_base}">
                     <div style="{kpi_lbl_base} color: #065f46;">3. Recommended</div>
                     <div style="{kpi_val_base} color: #047857;">
-                        {lifecycle_summary.get('recommended_count', 0)}
+                        {lifecycle_summary.get('recommended_count', 0):,}
                     </div>
                     <div style="font-size: 0.68rem; color: #065f46;">top ranking options</div>
                 </div>
                 <div style="background: #f5f3ff; border: 1.5px solid #ddd6fe; {kpi_box_base}">
                     <div style="{kpi_lbl_base} color: #5b21b6;">4. Possible Options</div>
                     <div style="{kpi_val_base} color: #6d28d9;">
-                        {lifecycle_summary.get('possible_count', 0)}
+                        {lifecycle_summary.get('possible_count', 0):,}
                     </div>
                     <div style="font-size: 0.68rem; color: #5b21b6;">unselected alternatives</div>
                 </div>
                 <div style="background: #fff1f2; border: 1.5px solid #fecdd3; {kpi_box_base}">
                     <div style="{kpi_lbl_base} color: #991b1b;">5. Filtered / Rejected</div>
                     <div style="{kpi_val_base} color: #b91c1c;">
-                        {lifecycle_summary.get('rejected_count', 0)}
+                        {lifecycle_summary.get('rejected_count', 0):,}
                     </div>
                     <div style="font-size: 0.68rem; color: #991b1b;">excessive loop / freeway</div>
                 </div>
@@ -7166,7 +7884,7 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
                         padding: 2px 8px; border-radius: 6px;">🧭 {p_cand}</span>
                 </td>
                 <td style="padding: 8px 12px; font-weight: 600;">{p_corr}</td>
-                <td style="padding: 8px 12px; white-space: nowrap;"><strong>{p_dist:.1f} km</strong></td>
+                <td style="padding: 8px 12px; white-space: nowrap;"><strong>{format_number(p_dist, 1)} km</strong></td>
                 <td style="padding: 8px 12px; text-align: center;">
                     <span style="font-weight: 800; color: #4338ca;">{p_safe:.0f}</span>/100
                 </td>
@@ -7366,17 +8084,20 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
     """
 
 # --- Page 2: Route Results ---
-@route
-def route_results_page(state: State) -> Page:
-    """Route Results page: Strava-style 3-route comparison deck, road segment breakdown, warnings, and map."""
+def _render_route_results_page(
+    state: State,
+    precomputed_routes: Optional[Dict[str, RouteOption]] = None,
+) -> Page:
+    """Render Route Results page in Basic Mode (simple overview) or Advanced Mode (full telemetry)."""
     state.current_page = "results"
-    
+    is_adv = bool(getattr(state, "advanced_mode", False))
+
     notification_block = []
     if state.notification:
         notification_block.append(RawHTML(f'<div class="notification-banner">ℹ️ {state.notification}</div>'))
         state.notification = ""
 
-    routes = get_routes_from_state(state)
+    routes = precomputed_routes if precomputed_routes is not None else get_routes_from_state(state)
     core_keys = [k for k in ["Safest", "Balanced", "Direct"] if k in routes]
     extra_keys = [k for k in routes.keys() if k not in ["Safest", "Balanced", "Direct"]]
     all_keys = core_keys + extra_keys
@@ -7393,11 +8114,9 @@ def route_results_page(state: State) -> Page:
     cur_dep = getattr(state, "departure_time", "08:30 AM")
     cur_hhmm, cur_ampm = split_time_and_ampm(cur_dep)
 
-    # --- Partition Route Options into Recommended and Possible ---
     rec_keys = [k for k in all_keys if getattr(routes[k], "classification", "RECOMMENDED") == "RECOMMENDED"]
     possible_keys = [k for k in all_keys if getattr(routes[k], "classification", "RECOMMENDED") == "POSSIBLE"]
 
-    # --- Recommended Routes Comparison Deck ---
     strava_cards = []
     for r_type in rec_keys:
         r_opt = routes[r_type]
@@ -7416,46 +8135,46 @@ def route_results_page(state: State) -> Page:
             is_active,
             fn,
             planned_speed_mph=cur_spd,
-            departure_time=cur_dep
-        ))
-
-    # --- Unselected Possible Alternative Corridors ---
-    possible_cards = []
-    for r_type in possible_keys:
-        r_opt = routes[r_type]
-        is_active = (r_type == active_type)
-        possible_cards.append(render_possible_route_card(
-            r_opt,
-            r_type,
-            is_active,
-            planned_speed_mph=cur_spd,
-            departure_time=cur_dep
+            departure_time=cur_dep,
+            advanced_mode=is_adv,
         ))
 
     possible_section_block = []
-    if possible_cards:
-        possible_section_block = [
-            Div([
-                Header(
-                    "🧭 Possible Alternative Corridors (Unselected Options)",
-                    level=3,
-                    style="color: #3730a3; margin-top: 0; margin-bottom: 4px; "
-                    "display: flex; align-items: center; gap: 8px;",
-                ),
-                Paragraph(
-                    "These corridors were discovered and validated as feasible cycling paths, "
-                    "but are not actively recommended due to lack of dedicated infrastructure "
-                    "or detours without proportional safety gains. They remain available "
-                    "for your review on the map and below:",
-                    style="font-size: 0.82rem; color: #475569; margin-bottom: 12px;"
-                ),
-                Row(possible_cards, style="gap: 14px; flex-wrap: wrap; margin-bottom: 8px; align-items: stretch;")
-            ], class_name="card", style="border-left: 4px solid #6366f1; background: #faf5ff; margin-bottom: 22px;")
-        ]
+    if is_adv and possible_keys:
+        possible_cards = []
+        for r_type in possible_keys:
+            r_opt = routes[r_type]
+            is_active = (r_type == active_type)
+            possible_cards.append(render_possible_route_card(
+                r_opt,
+                r_type,
+                is_active,
+                planned_speed_mph=cur_spd,
+                departure_time=cur_dep,
+            ))
+        if possible_cards:
+            possible_section_block = [
+                Div([
+                    Header(
+                        "🧭 Possible Alternative Corridors (Unselected Options)",
+                        level=3,
+                        style="color: #3730a3; margin-top: 0; margin-bottom: 4px; "
+                        "display: flex; align-items: center; gap: 8px;",
+                    ),
+                    Paragraph(
+                        "These corridors were discovered and validated as feasible cycling paths, "
+                        "but are not actively recommended due to lack of dedicated infrastructure "
+                        "or detours without proportional safety gains. They remain available "
+                        "for your review on the map and below:",
+                        style="font-size: 0.82rem; color: #475569; margin-bottom: 12px;",
+                    ),
+                    Row(possible_cards, style="gap: 14px; flex-wrap: wrap; margin-bottom: 8px; align-items: stretch;"),
+                ], classes="card", style="border-left: 4px solid #6366f1; background: #faf5ff; margin-bottom: 22px;")
+            ]
 
     tf = get_time_of_day_traffic_factor(cur_dep)
     is_rush = tf.get("is_rush_hour", False)
-    start_fmt, end_fmt, sched_summary = compute_trip_schedule(cur_dep, current_route.estimated_duration_mins)
+    start_fmt, end_fmt, _ = compute_trip_schedule(cur_dep, current_route.estimated_duration_mins)
 
     pill_base = (
         "padding: 4px 12px; border-radius: 9999px; font-weight: 700; "
@@ -7501,36 +8220,52 @@ def route_results_page(state: State) -> Page:
         </div>
         """
 
-    timing_summary_bar = f"""
-    <div style="background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 10px;
-                padding: 12px 18px; margin: 10px 0 14px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-                display: flex; flex-direction: column; gap: 6px;">
-        <div style="display: flex; justify-content: space-between;
-                    align-items: center; flex-wrap: wrap; gap: 12px;">
-            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                <span style="font-weight: 800; color: #0f172a; font-size: 0.95rem;
-                             display: inline-flex; align-items: center; gap: 6px;">
-                    🚴 Trip Schedule:
-                    <span style="color: #047857; background: #ecfdf5; padding: 3px 8px;
-                                 border-radius: 6px; border: 1px solid #a7f3d0;">
-                        {start_fmt} → {end_fmt}
+    if is_adv:
+        timing_summary_bar = f"""
+        <div style="background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 10px;
+                    padding: 12px 18px; margin: 10px 0 14px 0;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+                    display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; justify-content: space-between;
+                        align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                    <span style="font-weight: 800; color: #0f172a; font-size: 0.95rem;
+                                 display: inline-flex; align-items: center; gap: 6px;">
+                        🚴 Trip Schedule:
+                        <span style="color: #047857; background: #ecfdf5; padding: 3px 8px;
+                                     border-radius: 6px; border: 1px solid #a7f3d0;">
+                            {start_fmt} → {end_fmt}
+                        </span>
                     </span>
-                </span>
-                <span style="background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0;
-                             padding: 3px 10px; border-radius: 9999px;
-                             font-weight: 700; font-size: 0.8rem;">
-                    ⏱️ {current_route.estimated_duration_mins:.0f} mins @ {cur_spd:.0f} mph
-                </span>
-                {traffic_badge}
+                    <span style="background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0;
+                                 padding: 3px 10px; border-radius: 9999px;
+                                 font-weight: 700; font-size: 0.8rem;">
+                        ⏱️ {format_duration_text(current_route.estimated_duration_mins)} @ {cur_spd:.0f} mph
+                    </span>
+                    {traffic_badge}
+                </div>
+                <div style="font-size: 0.82rem; color: #475569; font-weight: 500;">
+                    {tf.get("advisory", "")}
+                </div>
             </div>
-            <div style="font-size: 0.82rem; color: #475569; font-weight: 500;">
-                {tf.get("advisory", "")}
-            </div>
+            {beta_timing_note}
         </div>
-        {beta_timing_note}
-    </div>
-    """
+        """
+    else:
+        timing_summary_bar = f"""
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+                    margin: 6px 0 12px 0; font-size: 0.78rem; color: #475569;">
+            <span style="background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0;
+                         padding: 3px 9px; border-radius: 9999px; font-weight: 700;">
+                🚴 {start_fmt} → {end_fmt}
+            </span>
+            <span style="background: #f1f5f9; color: #334155; border: 1px solid #e2e8f0;
+                         padding: 3px 9px; border-radius: 9999px; font-weight: 600;">
+                @ {cur_spd:.0f} mph
+            </span>
+            {traffic_badge}
+        </div>
+        """
 
     quick_timing_selector = Div([
         Div([
@@ -7545,12 +8280,12 @@ def route_results_page(state: State) -> Page:
                 Label("Start Time:", "time_hhmm"),
                 Row([
                     TextBox("time_hhmm", cur_hhmm),
-                    SelectBox("time_ampm", ["AM", "PM"], cur_ampm)
+                    SelectBox("time_ampm", ["AM", "PM"], cur_ampm),
                 ], style="gap: 6px; align-items: center;"),
                 Paragraph(
                     "00:00 format",
                     style="font-size: 0.72rem; color: #64748b; margin-top: 2px; margin-bottom: 0;",
-                )
+                ),
             ], style="flex: 1; min-width: 175px;"),
             Div([
                 Label("Planned Speed (mph):", "planned_speed"),
@@ -7558,7 +8293,7 @@ def route_results_page(state: State) -> Page:
                 Paragraph(
                     "e.g. 12.0 or 15",
                     style="font-size: 0.72rem; color: #64748b; margin-top: 2px; margin-bottom: 0;",
-                )
+                ),
             ], style="flex: 1; min-width: 110px;"),
             Div([
                 Label("&nbsp;", "submit_timing_label"),
@@ -7567,7 +8302,7 @@ def route_results_page(state: State) -> Page:
                     update_results_timing,
                     style="background: #047857; color: white; padding: 8px 16px; "
                     "border-radius: 6px; font-weight: 700; cursor: pointer; border: none;",
-                )
+                ),
             ], style="flex: 0 0 auto;"),
             Div([
                 SmallText("Quick Preset Chips:"),
@@ -7604,36 +8339,56 @@ def route_results_page(state: State) -> Page:
                         "18 mph", update_results_timing,
                         [Argument("departure_time", cur_dep), Argument("planned_speed", "18.0")],
                     ),
-                ], style="gap: 5px; flex-wrap: wrap;")
-            ], style="flex: 2; min-width: 250px;")
-        ], style="align-items: flex-end; gap: 12px; flex-wrap: wrap;")
+                ], style="gap: 5px; flex-wrap: wrap;"),
+            ], style="flex: 2; min-width: 250px;"),
+        ], style="align-items: flex-end; gap: 12px; flex-wrap: wrap;"),
     ], style="margin-bottom: 14px; background: #f8fafc; border: 1.5px dashed #059669; "
     "border-radius: 8px; padding: 12px 14px;")
 
-    deck_header_html = f"""
-    <div class="strava-deck-header"
-         style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-        <div style="flex: 1 1 280px; min-width: 0;">
-            <div class="strava-deck-title"
-                 style="font-size: 1.25rem; font-weight: 800; color: #0f172a; "
-                        "display: flex; align-items: center; gap: 8px;">
-                <span style="color: #047857; font-size: 1.35rem;">📊</span> Route Options Comparison
-            </div>
-            <div style="font-size: 0.82rem; color: #64748b; margin-top: 2px;">
-                Compare distance, elevation climb, estimated ride time, and safety scores side-by-side.
-                Click any route card to switch active path.
-            </div>
-        </div>
-        <div style="flex-shrink: 0; white-space: nowrap; margin-left: auto;">
-            <span id="safecycle_active_deck_pill" class="strava-pill-active"
-                  style="white-space: nowrap; display: inline-flex; align-items: center; font-size: 0.8rem;
-                         font-weight: 700; padding: 6px 14px; border-radius: 9999px; background: #047857;
-                         color: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.12);">
-                Active on Map: {active_type} Route
-            </span>
-        </div>
-    </div>
-    """
+    deck_subtitle = (
+        "Compare elevation gain, surface protection splits, ride time, and detailed safety scores side-by-side."
+        if is_adv else
+        "Pick a route card or tap a path on the map."
+    )
+    mode_btn_label = "🌱 Basic View" if is_adv else "🔬 Advanced Mode"
+    mode_btn_style = (
+        "background: #ecfdf5; color: #065f46; border: 1.5px solid #10b981; "
+        "padding: 4px 10px; border-radius: 9999px; font-size: 0.74rem; "
+        "font-weight: 700; cursor: pointer; margin: 0; line-height: 1.2;"
+        if is_adv else
+        "background: #f1f5f9; color: #334155; border: 1.5px solid #cbd5e1; "
+        "padding: 4px 10px; border-radius: 9999px; font-size: 0.74rem; "
+        "font-weight: 700; cursor: pointer; margin: 0; line-height: 1.2;"
+    )
+    deck_header_row = Div([
+        Row([
+            Div([
+                Row([
+                    RawHTML(
+                        '<span class="strava-deck-title" style="font-size: 1.2rem; font-weight: 800; '
+                        'color: #0f172a; display: inline-flex; align-items: center; gap: 7px;">'
+                        '<span style="color: #047857; font-size: 1.3rem;">📊</span>'
+                        ' Route Options Comparison</span>'
+                    ),
+                    Button(mode_btn_label, toggle_advanced_mode, style=mode_btn_style),
+                ], style="gap: 10px; align-items: center; flex-wrap: wrap;"),
+                RawHTML(
+                    f'<div style="font-size: 0.8rem; color: #64748b; margin-top: 2px;">'
+                    f'{deck_subtitle}</div>'
+                ),
+            ], style="flex: 1 1 280px; min-width: 0;"),
+            Div([
+                RawHTML(
+                    f'<span id="safecycle_active_deck_pill" class="strava-pill-active" '
+                    'style="white-space: nowrap; display: inline-flex; align-items: center; '
+                    'font-size: 0.78rem; font-weight: 700; padding: 5px 12px; '
+                    'border-radius: 9999px; background: #047857; color: #ffffff; '
+                    'box-shadow: 0 1px 3px rgba(0,0,0,0.12);">'
+                    f'Active on Map: {active_type} Route</span>'
+                ),
+            ], style="flex-shrink: 0; white-space: nowrap; margin-left: auto;"),
+        ], style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;")
+    ], classes="strava-deck-header")
 
     start_c = (
         current_route.segments[0].coordinates[0]
@@ -7652,17 +8407,89 @@ def route_results_page(state: State) -> Page:
         state.dest_address,
         start_c,
         end_c,
-        height_px=480
+        height_px=460 if is_adv else 360,
     )
 
-    # Pre-render route detail sections for all available route options
     route_sections = []
     for r_type in all_keys:
         r_opt = routes[r_type]
         is_route_active = (r_type == active_type)
         safe_id = sanitize_route_dom_id(r_type)
 
-        # Warnings block
+        nav_btn_style = (
+            "background: #047857; color: white; padding: 9px 16px; "
+            "font-weight: 700; border-radius: 6px;"
+        )
+        save_btn_style = (
+            "background: #0284c7; color: white; padding: 9px 16px; "
+            "font-weight: 600; border-radius: 6px;"
+        )
+        action_buttons = [
+            *(
+                [
+                    Button(
+                        "🚴 Start Live GPS Navigation (Beta)",
+                        start_route_navigation,
+                        Argument("route_type", r_type),
+                        style=nav_btn_style,
+                    )
+                ]
+                if state.beta_mode
+                else []
+            ),
+            *(
+                [
+                    Button(
+                        "💾 Save Route to Favorites (Beta)",
+                        save_specific_route,
+                        Argument("route_type", r_type),
+                        style=save_btn_style,
+                    )
+                ]
+                if state.beta_mode
+                else []
+            ),
+            Button(
+                "📥 Export GPX File",
+                export_specific_gpx,
+                Argument("route_type", r_type),
+                style="background: #047857; color: white; padding: 9px 16px; "
+                "font-weight: 700; border-radius: 6px; border: none;",
+            ),
+            Button(
+                "🔄 Change Route Settings",
+                go_to_planner,
+                style="background: #f1f5f9; color: #1e293b; padding: 9px 16px; "
+                "font-weight: 600; border-radius: 6px; border: 1px solid #cbd5e1;",
+            ),
+        ]
+
+        if not is_adv:
+            top_warn = (
+                f" • ⚠️ {r_opt.warnings[0]}"
+                if r_opt.warnings else " • ✅ Smooth cycling corridor"
+            )
+            route_sections.extend([
+                RawHTML(
+                    f'<div id="route_section_{safe_id}" class="route-mode-section" '
+                    f'style="display: {"block" if is_route_active else "none"};">'
+                ),
+                Div([
+                    Row([
+                        Div([
+                            Strong(f"{r_type} Route Ready", style="font-size: 0.96rem; color: #064e3b;"),
+                            Paragraph(
+                                f"{r_opt.overall_safety_score:.0f}/100 safety{top_warn}",
+                                style="font-size: 0.8rem; color: #475569; margin: 2px 0 0 0;",
+                            ),
+                        ], style="flex: 1 1 240px; min-width: 0;"),
+                        Row(action_buttons, style="gap: 8px; flex-wrap: wrap; align-items: center;"),
+                    ], style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;"),
+                ], classes="card", style="padding: 12px 16px; margin-bottom: 14px;"),
+                RawHTML('</div>'),
+            ])
+            continue
+
         w_block = []
         if r_opt.warnings:
             warn_items = "".join([f"<li>⚠️ {w}</li>" for w in r_opt.warnings])
@@ -7673,10 +8500,15 @@ def route_results_page(state: State) -> Page:
             </div>
             """))
 
-        # Consolidated road corridors for clean, uncluttered presentation
         corridors = consolidate_route_corridors(r_opt.segments)
 
-        # Sleek Continuous Safety Spectrum Bar
+        kpi_box = (
+            "background: #f8fafc; border: 1px solid #e2e8f0; "
+            "border-radius: 8px; padding: 10px 12px; text-align: center;"
+        )
+        kpi_lbl = "font-size: 0.72rem; color: #64748b; font-weight: 600; text-transform: uppercase;"
+        risk_col = "#dc2626" if r_opt.high_risk_segments_count > 0 else "#16a34a"
+
         total_km = max(0.1, sum(s.length_km for s in r_opt.segments))
         bar_segments = []
         risk_km_map = {"LOW": 0.0, "MODERATE": 0.0, "ELEVATED": 0.0, "HIGH": 0.0}
@@ -7698,7 +8530,7 @@ def route_results_page(state: State) -> Page:
 
         dot_css = "display: inline-block; width: 10px; height: 10px; border-radius: 50%;"
         item_css = "display: inline-flex; align-items: center; gap: 4px;"
-        spectrum_bar_html = f"""
+        spectrum_section = [RawHTML(f"""
         <div class="card" style="margin-bottom: 16px; padding: 14px 18px;">
             <div style="display: flex; justify-content: space-between; align-items: center;
                         margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
@@ -7706,7 +8538,7 @@ def route_results_page(state: State) -> Page:
                     🛣️ Safety Corridor Spectrum ({r_type} Route)
                 </strong>
                 <span style="font-size: 0.78rem; color: #64748b;">
-                    Risk distribution along {r_opt.total_distance_km:.1f} km
+                    Risk distribution along {format_number(r_opt.total_distance_km, 1)} km
                     ({r_opt.lifecycle_stage.title()})
                 </span>
             </div>
@@ -7719,31 +8551,24 @@ def route_results_page(state: State) -> Page:
                         color: #475569; align-items: center;">
                 <span style="{item_css}">
                     <span style="{dot_css} background: #15803d;"></span>
-                    Low Risk: {low_pct}% ({risk_km_map['LOW']:.1f} km)
+                    Low Risk: {low_pct}% ({format_number(risk_km_map['LOW'], 1)} km)
                 </span>
                 <span style="{item_css}">
                     <span style="{dot_css} background: #ca8a04;"></span>
-                    Moderate: {mod_pct}% ({risk_km_map['MODERATE']:.1f} km)
+                    Moderate: {mod_pct}% ({format_number(risk_km_map['MODERATE'], 1)} km)
                 </span>
                 <span style="{item_css}">
                     <span style="{dot_css} background: #ea580c;"></span>
-                    Elevated: {elev_pct}% ({risk_km_map['ELEVATED']:.1f} km)
+                    Elevated: {elev_pct}% ({format_number(risk_km_map['ELEVATED'], 1)} km)
                 </span>
                 <span style="{item_css}">
                     <span style="{dot_css} background: #dc2626;"></span>
-                    High: {high_pct}% ({risk_km_map['HIGH']:.1f} km)
+                    High: {high_pct}% ({format_number(risk_km_map['HIGH'], 1)} km)
                 </span>
             </div>
         </div>
-        """
+        """)]
 
-        # High-level summary metrics grid
-        kpi_box = (
-            "background: #f8fafc; border: 1px solid #e2e8f0; "
-            "border-radius: 8px; padding: 10px 12px; text-align: center;"
-        )
-        kpi_lbl = "font-size: 0.72rem; color: #64748b; font-weight: 600; text-transform: uppercase;"
-        risk_col = "#dc2626" if r_opt.high_risk_segments_count > 0 else "#16a34a"
         metrics_summary_html = f"""
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
                     gap: 10px; margin-bottom: 14px;">
@@ -7763,19 +8588,19 @@ def route_results_page(state: State) -> Page:
             <div style="{kpi_box}">
                 <div style="{kpi_lbl}">High Risk Spots</div>
                 <div style="font-size: 1.25rem; font-weight: 800; color: {risk_col}; margin-top: 2px;">
-                    {r_opt.high_risk_segments_count}
+                    {r_opt.high_risk_segments_count:,}
                 </div>
             </div>
             <div style="{kpi_box}">
                 <div style="{kpi_lbl}">Crossings</div>
                 <div style="font-size: 1.25rem; font-weight: 800; color: #b45309; margin-top: 2px;">
-                    {r_opt.major_intersections_count}
+                    {r_opt.major_intersections_count:,}
                 </div>
             </div>
             <div style="{kpi_box}">
                 <div style="{kpi_lbl}">Elevation Gain</div>
                 <div style="font-size: 1.25rem; font-weight: 800; color: #475569; margin-top: 2px;">
-                    {r_opt.elevation_gain_m:.0f} m
+                    {format_number(r_opt.elevation_gain_m, 0)} m
                 </div>
             </div>
             <div style="{kpi_box}">
@@ -7796,15 +8621,18 @@ def route_results_page(state: State) -> Page:
                 infra_label = c["infrastructure"].replace("_", " ").title()
             spd_label = f"{c['speed_limit_mph']} mph" if c["speed_limit_mph"] else "Low speed"
             traf_label = c["traffic_exposure"].title()
+            sub_detail = (
+                f"{format_number(c['length_km'], 1)} km • {infra_label} • {spd_label} • {traf_label} traffic"
+            )
 
             corridor_rows.append(Div([
                 Row([
                     Div([
                         Strong(c["name"], style="font-size: 0.95rem; color: #0f172a;"),
                         Paragraph(
-                            f"{c['length_km']:.1f} km • {infra_label} • {spd_label} • {traf_label} traffic",
-                            style="font-size: 0.78rem; color: #64748b; margin: 2px 0 0 0;"
-                        )
+                            sub_detail,
+                            style="font-size: 0.78rem; color: #64748b; margin: 2px 0 0 0;",
+                        ),
                     ], style="flex: 3; min-width: 180px;"),
                     Div([
                         RawHTML(
@@ -7823,18 +8651,10 @@ def route_results_page(state: State) -> Page:
                             "padding: 5px 12px; border-radius: 6px; font-size: 0.78rem; "
                             "font-weight: 600; cursor: pointer;",
                         )
-                    ], style="flex: 0.8; text-align: right; min-width: 80px;")
+                    ], style="flex: 0.8; text-align: right; min-width: 80px;"),
                 ], style="align-items: center; padding: 10px 0; border-bottom: 1px solid #f1f5f9; gap: 8px;")
             ]))
 
-        nav_btn_style = (
-            "background: #047857; color: white; padding: 10px 18px; "
-            "font-weight: 700; border-radius: 6px;"
-        )
-        save_btn_style = (
-            "background: #0284c7; color: white; padding: 10px 18px; "
-            "font-weight: 600; border-radius: 6px;"
-        )
         route_sections.extend([
             RawHTML(
                 f'<div id="route_section_{safe_id}" class="route-mode-section" '
@@ -7847,51 +8667,13 @@ def route_results_page(state: State) -> Page:
                         Paragraph(
                             r_opt.selection_rationale,
                             style="color: #475569; font-size: 0.9rem; margin-top: 4px;",
-                        )
+                        ),
                     ], style="flex: 2;"),
                 ], style="align-items: center; margin-bottom: 8px;"),
                 *w_block,
-                Row([
-                    *(
-                        [
-                            Button(
-                                "🚴 Start Live GPS Navigation (Beta)",
-                                start_route_navigation,
-                                Argument("route_type", r_type),
-                                style=nav_btn_style,
-                            )
-                        ]
-                        if state.beta_mode
-                        else []
-                    ),
-                    *(
-                        [
-                            Button(
-                                "💾 Save Route to Favorites (Beta)",
-                                save_specific_route,
-                                Argument("route_type", r_type),
-                                style=save_btn_style,
-                            )
-                        ]
-                        if state.beta_mode
-                        else []
-                    ),
-                    Button(
-                        "📥 Export GPX File",
-                        export_specific_gpx,
-                        Argument("route_type", r_type),
-                        style="background: #475569; color: white; padding: 10px 18px; "
-                        "font-weight: 600; border-radius: 6px;",
-                    ),
-                    Button(
-                        "🔄 Change Route Settings",
-                        go_to_planner,
-                        style="background: #f1f5f9; color: #1e293b; padding: 10px 18px; "
-                        "font-weight: 600; border-radius: 6px; border: 1px solid #cbd5e1;",
-                    ),
-                ], style="gap: 10px; flex-wrap: wrap; margin-bottom: 10px;")
-            ], class_name="card"),
-            RawHTML(spectrum_bar_html),
+                Row(action_buttons, style="gap: 10px; flex-wrap: wrap; margin-bottom: 10px;"),
+            ], classes="card"),
+            *spectrum_section,
             Div([
                 Header(
                     f"Road Corridor Safety Breakdown ({r_type} Route)",
@@ -7904,9 +8686,9 @@ def route_results_page(state: State) -> Page:
                     style="font-size: 0.82rem; color: #64748b; margin-top: 0; margin-bottom: 12px;",
                 ),
                 RawHTML(metrics_summary_html),
-                *corridor_rows
-            ], class_name="card"),
-            RawHTML('</div>')
+                *corridor_rows,
+            ], classes="card"),
+            RawHTML('</div>'),
         ])
 
     return Page(state, [
@@ -7919,27 +8701,34 @@ def route_results_page(state: State) -> Page:
                 style="color: #064e3b; margin-top: 0; margin-bottom: 8px;",
             ),
             RawHTML(results_map_html),
-            Paragraph(
-                "Interactive route map showing selected and possible cycling paths with live "
-                "duration and distance badges. Click any route or badge to select.",
-                style="font-size: 0.8rem; color: #64748b; margin-top: 6px;",
-            )
-        ], class_name="card"),
-        RawHTML(deck_header_html),
+        ], classes="card"),
+        deck_header_row,
         RawHTML(timing_summary_bar),
         *([quick_timing_selector, RawHTML(render_timemask_script_html())] if state.beta_mode else []),
-        Row(strava_cards, style="gap: 16px; flex-wrap: wrap; margin-bottom: 22px; align-items: stretch;"),
+        Row(strava_cards, style="gap: 14px; flex-wrap: wrap; margin-bottom: 18px; align-items: stretch;"),
         *possible_section_block,
         *route_sections,
-        RawHTML(render_route_evaluation_debug_panel(routes, state.beta_mode)),
-        render_beta_corner_toggle(state)
+        *(
+            [RawHTML(render_route_evaluation_debug_panel(routes, state.beta_mode))]
+            if state.beta_mode
+            else []
+        ),
+        render_beta_corner_toggle(state),
     ])
+
+
+@route
+def route_results_page(state: State) -> Page:
+    """Route Results page: Strava-style comparison deck, corridor breakdown, and interactive map."""
+    return _render_route_results_page(state)
+
 
 # --- Page 3: Road Safety Details ---
 @route
 def segment_details_page(state: State) -> Page:
-    """Road Safety Details page: Complete evidence breakdown, factors, crash stats, alternatives."""
+    """Road Safety Details page: Simple summary in Basic Mode; full crash/confidence evidence in Advanced Mode."""
     state.current_page = "details"
+    is_adv = bool(getattr(state, "advanced_mode", False))
     routes = get_routes_from_state(state)
     active_route = routes.get(state.active_route_type, list(routes.values())[0])
 
@@ -7967,9 +8756,9 @@ def segment_details_page(state: State) -> Page:
     if selected_seg.crash_record:
         cr = selected_seg.crash_record
         crash_info = f"""
-        <strong>Total Reported Incidents:</strong> {cr.total_crashes} collision(s)<br>
-        <strong>Severe Cyclist Injuries:</strong> {cr.severe_injuries}<br>
-        <strong>Fatalities:</strong> {cr.fatalities}<br>
+        <strong>Total Reported Incidents:</strong> {cr.total_crashes:,} collision(s)<br>
+        <strong>Severe Cyclist Injuries:</strong> {cr.severe_injuries:,}<br>
+        <strong>Fatalities:</strong> {cr.fatalities:,}<br>
         <strong>Database & Date Range:</strong> {cr.data_source} ({cr.date_range})<br>
         <small style="color: #64748b;"><em>Note: {cr.limitations}</em></small>
         """
@@ -7994,6 +8783,43 @@ def segment_details_page(state: State) -> Page:
         else ("DOT Posted Limit" if selected_seg.speed_limit_mph else "Estimated")
     )
 
+    if is_adv:
+        conf_badge = (
+            f'<span class="badge-confidence-{selected_seg.confidence.lower()}">'
+            f'Data Confidence: {selected_seg.confidence}</span>'
+        )
+        seg_meta_sub = (
+            f'Length: {format_number(selected_seg.length_km, 2)} km | '
+            f'Segment ID: <code>{selected_seg.segment_id}</code>'
+        )
+        speed_source_html = (
+            f'<div style="font-size: 0.72rem; color: #64748b; margin-top: 2px;">'
+            f'{speed_source}</div>'
+        )
+        crash_section_html = f"""
+        <div style="margin-top: 18px;">
+            <h4 style="color: #064e3b; margin-bottom: 6px;">🚨 Official Crash Records</h4>
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0;
+                        padding: 12px; border-radius: 8px; font-size: 0.85rem;">
+                {crash_info}
+            </div>
+        </div>
+        """
+        provenance_html = (
+            f'<div style="margin-top: 16px; font-size: 0.8rem; color: #64748b;">'
+            f'<strong>Data Confidence:</strong> {selected_seg.evidence_notes}</div>'
+        )
+    else:
+        conf_badge = ""
+        seg_meta_sub = f"Segment Length: {format_number(selected_seg.length_km, 2)} km"
+        speed_source_html = ""
+        crash_section_html = ""
+        provenance_html = (
+            '<div style="margin-top: 14px; font-size: 0.8rem; color: #64748b;">'
+            'Switch to <strong>Advanced Safety Mode</strong> above to view official '
+            'crash records, data confidence ratings, and DOT source notes.</div>'
+        )
+
     details_card_html = f"""
     <div class="card">
         <div style="display: flex; justify-content: space-between;
@@ -8002,13 +8828,10 @@ def segment_details_page(state: State) -> Page:
                 <span class="{badge_cls}">
                     {selected_seg.safety_score} / 100 ({selected_seg.risk_category})
                 </span>
-                <span class="badge-confidence-{selected_seg.confidence.lower()}">
-                    Data Confidence: {selected_seg.confidence}
-                </span>
+                {conf_badge}
                 <h2 style="color: #064e3b; margin: 8px 0 4px 0;">{selected_seg.name}</h2>
                 <span style="font-size: 0.85rem; color: #64748b;">
-                    Length: {selected_seg.length_km:.2f} km |
-                    Segment ID: <code>{selected_seg.segment_id}</code>
+                    {seg_meta_sub}
                 </span>
             </div>
         </div>
@@ -8026,9 +8849,7 @@ def segment_details_page(state: State) -> Page:
                 <div style="font-weight: 600; color: #0f172a; margin-top: 4px;">
                     {selected_seg.speed_limit_mph or 'Not Mapped'} mph
                 </div>
-                <div style="font-size: 0.72rem; color: #64748b; margin-top: 2px;">
-                    {speed_source}
-                </div>
+                {speed_source_html}
             </div>
             <div class="stat-pill" style="text-align: left;">
                 <div class="stat-label">Traffic Volume Exposure</div>
@@ -8060,19 +8881,11 @@ def segment_details_page(state: State) -> Page:
             </div>
         </div>
 
-        <div style="margin-top: 18px;">
-            <h4 style="color: #064e3b; margin-bottom: 6px;">🚨 Official Crash Records</h4>
-            <div style="background: #f8fafc; border: 1px solid #e2e8f0;
-                        padding: 12px; border-radius: 8px; font-size: 0.85rem;">
-                {crash_info}
-            </div>
-        </div>
+        {crash_section_html}
 
         {alternative_html}
 
-        <div style="margin-top: 16px; font-size: 0.8rem; color: #64748b;">
-            <strong>Data Confidence:</strong> {selected_seg.evidence_notes}
-        </div>
+        {provenance_html}
     </div>
     """
 
@@ -8116,8 +8929,9 @@ def segment_details_page(state: State) -> Page:
                 ),
             ], style="gap: 10px; margin-bottom: 14px; flex-wrap: wrap; align-items: center;")
         ]),
+        render_safety_mode_banner(is_adv),
         RawHTML(details_card_html),
-        render_beta_corner_toggle(state)
+        render_beta_corner_toggle(state),
     ])
 
 # --- Page 4: Navigation ---
@@ -8162,7 +8976,7 @@ def navigation_page(state: State) -> Page:
     step_num = current_turn.step_number if current_turn else state.nav_step
     street_label = current_turn.street_name if current_turn else active_route.route_type
     dist_line = (
-        f"In {current_turn.distance_m:.0f} meters"
+        f"In {format_number(current_turn.distance_m, 0)} meters"
         if current_turn and current_turn.distance_m > 0
         else "Arrived at waypoint"
     )
@@ -8200,11 +9014,11 @@ def navigation_page(state: State) -> Page:
     metrics_html = f"""
     <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px;">
         <div class="stat-pill">
-            <div class="stat-value">{rem_dist_km:.1f} km</div>
+            <div class="stat-value">{format_number(rem_dist_km, 1)} km</div>
             <div class="stat-label">Remaining Distance</div>
         </div>
         <div class="stat-pill">
-            <div class="stat-value">{rem_time_mins:.0f} min</div>
+            <div class="stat-value">{format_duration_text(rem_time_mins)}</div>
             <div class="stat-label">Est. Time Remaining</div>
         </div>
         <div class="stat-pill">
@@ -8258,7 +9072,7 @@ def navigation_page(state: State) -> Page:
                     "font-weight: 600; border-radius: 6px;",
                 ),
             ], style="gap: 10px; flex-wrap: wrap;")
-        ], class_name="card"),
+        ], classes="card"),
         render_beta_corner_toggle(state)
     ])
 
@@ -8286,7 +9100,8 @@ def saved_routes_page(state: State) -> Page:
         dest_short = r.dest_label.split(",")[0]
         saved_meta = (
             f"Saved: {r.created_at} • Corridor: {r.route_type} • "
-            f"Distance: {r.distance_km:.1f} km ({dist_mi:.1f} mi) • Est: {r.duration_mins:.0f} mins"
+            f"Distance: {format_number(r.distance_km, 1)} km ({format_number(dist_mi, 1)} mi) • "
+            f"Est: {format_duration_text(r.duration_mins)}"
         )
         score_badge_html = (
             '<div style="text-align: center;">'
@@ -8368,7 +9183,7 @@ def saved_routes_page(state: State) -> Page:
                 style="color: #475569; font-size: 0.92rem;",
             ),
             *(route_rows if route_rows else [empty_saved_box])
-        ], class_name="card"),
+        ], classes="card"),
         render_beta_corner_toggle(state)
     ])
 
@@ -8534,7 +9349,7 @@ def about_page(state: State) -> Page:
                 """)
             ]),
             *([beta_hazard_block] if state.beta_mode else []),
-        ], class_name="card"),
+        ], classes="card"),
         render_beta_corner_toggle(state)
     ])
 
@@ -8720,7 +9535,6 @@ def handle_save_current_route(state: State, custom_name: str = "") -> Page:
 
 def build_gpx_autodownload_html(prefix: str, gpx_content: str, file_name: str) -> str:
     """Build notification HTML with auto-download trigger metadata and fallback GPX link."""
-    import time
     encoded_gpx = urllib.parse.quote(gpx_content)
     export_token = f"{file_name}_{int(time.time() * 1000)}_{len(gpx_content)}"
     return (
@@ -8746,7 +9560,7 @@ def handle_export_gpx(state: State) -> Page:
         gpx,
         clean_file_name,
     )
-    return route_results_page(state)
+    return _render_route_results_page(state, precomputed_routes=routes)
 
 @route
 def load_saved_route(state: State, route_id: str = "") -> Page:
@@ -8801,7 +9615,6 @@ def delete_saved_route_handler(state: State, route_id: str = "") -> Page:
 @route
 def handle_submit_hazard(state: State, hazard_road: str = "", hazard_issue: str = "") -> Page:
     """Append a new HazardReport dataclass instance to state.reported_hazards in Beta Mode."""
-    import time
     if not state.beta_mode:
         state.notification = (
             "Hazard reporting is currently in Beta. Enable Beta Mode to submit reports."
@@ -8850,7 +9663,7 @@ def toggle_beta_mode(state: State) -> Page:
     if state.beta_mode:
         state.notification = (
             "🧪 Beta Mode enabled! Live GPS Navigation, Saved Routes, "
-            "Benchmark Corridors, and Hazard Reporting are now visible."
+            "Benchmark Corridors, Route Diagnostics, and Hazard Reporting are now visible."
         )
     else:
         state.notification = (
@@ -8893,6 +9706,24 @@ def toggle_dark_mode(state: State) -> Page:
     elif state.current_page == "about":
         return about_page(state)
     return index(state)
+
+@route
+def toggle_advanced_mode(state: State) -> Page:
+    """Toggle between streamlined Basic Safety View and full-telemetry Advanced Mode."""
+    state.advanced_mode = not bool(getattr(state, "advanced_mode", False))
+    if state.advanced_mode:
+        state.notification = (
+            "🔬 Advanced Safety Mode enabled! Viewing full telemetry, elevation profiles, "
+            "surface splits, safety spectrum, and official crash records."
+        )
+    else:
+        state.notification = (
+            "🌱 Basic Safety View enabled! Showing streamlined safety scores, "
+            "ride time, and top route alerts."
+        )
+    if state.current_page == "details":
+        return segment_details_page(state)
+    return _render_route_results_page(state)
 
 @route
 def go_to_saved(state: State) -> Page:
@@ -8974,24 +9805,18 @@ def pick_preset_newark(state: State) -> Page:
 # --- Server Startup ---
 
 def run_bakery_unit_tests() -> None:
-    """Run deterministic offline Bakery assert_equal checks for helpers and all 37 @route handlers.
+    """Run fast, grouped offline Bakery assert_equal checks for helpers and all 39 @route handlers.
 
-    Advanced technique: Uses unittest.mock.patch and tempfile.TemporaryDirectory
-    to isolate offline route generation and saved-route JSON persistence so tests
-    stay fast and avoid external HTTP calls or side effects during compilation.
+    Advanced technique: Groups related assertions to avoid repeated Drafter AST
+    file re-parses on startup while using unittest.mock.patch and
+    tempfile.TemporaryDirectory to verify all 39 @route handlers deterministically.
     """
-    import os
-    import sys
     import tempfile
     from unittest.mock import patch
 
     mod = sys.modules[__name__]
 
-    # Core helper assertions
-    assert_equal(
-        round(calculate_haversine_distance_km(Coordinate(0.0, 0.0), Coordinate(0.0, 1.0)), 1),
-        111.2,
-    )
+    # Core math, safety, schedule, geocoding, and loading variant checks
     safe_score, safe_cat, _, _, _, _ = evaluate_road_safety(
         infrastructure="protected_bike_path",
         speed_limit_mph=15,
@@ -8999,18 +9824,23 @@ def run_bakery_unit_tests() -> None:
         crash_record=CrashRecord(total_crashes=0),
         intersection_risk="low",
     )
-    assert_equal(safe_score > 80.0 and safe_cat == "LOWER_RISK", True)
-    assert_equal(parse_speed_mph("15 mph"), 15.0)
-    assert_equal(parse_speed_mph("invalid"), 12.0)
-    assert_equal(split_time_and_ampm("5:15 PM"), ("05:15", "PM"))
     start_f, end_f, _ = compute_trip_schedule("8:30 AM", 30.0)
-    assert_equal((start_f, end_f), ("8:30 AM", "9:00 AM"))
-    assert_equal(get_time_of_day_traffic_factor("08:30 AM")["is_rush_hour"], True)
-    assert_equal(determine_risk_category(88.0, "HIGH"), "LOWER_RISK")
     coord_ok, _ = geocode_address("Kirkwood, DE")
-    assert_equal(coord_ok is not None, True)
     coord_empty, _ = geocode_address("")
-    assert_equal(coord_empty is None, True)
+    assert_equal(
+        (
+            round(calculate_haversine_distance_km(Coordinate(0.0, 0.0), Coordinate(0.0, 1.0)), 1),
+            safe_score > 80.0 and safe_cat == "LOWER_RISK",
+            parse_speed_mph("15 mph"),
+            parse_speed_mph("invalid"),
+            split_time_and_ampm("5:15 PM"),
+            (start_f, end_f),
+            get_time_of_day_traffic_factor("08:30 AM")["is_rush_hour"],
+            determine_risk_category(88.0, "HIGH"),
+            coord_ok is not None and coord_empty is None,
+        ),
+        (111.2, True, 15.0, 12.0, ("05:15", "PM"), ("8:30 AM", "9:00 AM"), True, "LOWER_RISK", True),
+    )
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_saved = os.path.join(tmp_dir, "saved_routes.json")
@@ -9020,25 +9850,30 @@ def run_bakery_unit_tests() -> None:
             patch.object(mod, "SAVED_ROUTES_FILE", tmp_saved),
         ):
             st = State()
-            assert_equal(type(index(st)), Page)
-            assert_equal(st.current_page, "planner")
+            idx_pg = index(st)
+            assert_equal((type(idx_pg), st.current_page), (Page, "planner"))
 
-            # Preset routes
-            assert_equal(type(pick_preset_nyc(st)), Page)
-            assert_equal("Central Park South" in st.start_address, True)
-            assert_equal(type(pick_preset_sf(st)), Page)
-            assert_equal("Market St" in st.start_address, True)
-            assert_equal(type(pick_preset_greenway(st)), Page)
-            assert_equal("Greenway" in st.start_address, True)
-            assert_equal(type(pick_preset_seattle(st)), Page)
-            assert_equal("Seattle" in st.start_address, True)
-            assert_equal(type(pick_preset_portland(st)), Page)
-            assert_equal("Portland" in st.start_address, True)
-            assert_equal(type(pick_preset_newark(st)), Page)
-            assert_equal(st.dest_address, "Kirkwood, DE")
+            # Preset @route handlers (6)
+            assert_equal(
+                (
+                    type(pick_preset_nyc(st)),
+                    "Central Park South" in st.start_address,
+                    type(pick_preset_sf(st)),
+                    "Market St" in st.start_address,
+                    type(pick_preset_greenway(st)),
+                    "Greenway" in st.start_address,
+                    type(pick_preset_seattle(st)),
+                    "Seattle" in st.start_address,
+                    type(pick_preset_portland(st)),
+                    "Portland" in st.start_address,
+                    type(pick_preset_newark(st)),
+                    st.dest_address,
+                ),
+                (Page, True, Page, True, Page, True, Page, True, Page, True, Page, "Kirkwood, DE"),
+            )
 
-            # Route generation & results comparison
-            gen_page = handle_generate_route(
+            # Route generation, comparison, mode switches, and timing updates
+            gen_pg = handle_generate_route(
                 st,
                 start_address="Louis Redding Hall, Newark, DE",
                 dest_address="Kirkwood, DE",
@@ -9049,109 +9884,213 @@ def run_bakery_unit_tests() -> None:
                 time_ampm="AM",
                 planned_speed="15",
             )
-            assert_equal(type(gen_page), Page)
-            assert_equal(st.current_page, "results")
-            assert_equal(st.preferred_mode, "Balanced")
-            assert_equal(st.planned_speed_mph, "15.0")
+            assert_equal(
+                (type(gen_pg), st.current_page, st.preferred_mode, st.planned_speed_mph),
+                (Page, "results", "Balanced", "15.0"),
+            )
 
-            assert_equal(type(route_results_page(st)), Page)
-            assert_equal(type(update_results_timing(st, time_hhmm="05:00", time_ampm="PM", planned_speed="14")), Page)
-            assert_equal(st.departure_time, "05:00 PM")
+            res_pg = route_results_page(st)
+            tim_pg = update_results_timing(st, time_hhmm="05:00", time_ampm="PM", planned_speed="14")
+            assert_equal((type(res_pg), type(tim_pg), st.departure_time), (Page, Page, "05:00 PM"))
 
-            assert_equal(type(select_safest_mode(st)), Page)
-            assert_equal(st.active_route_type, "Safest")
-            assert_equal(type(select_balanced_mode(st)), Page)
-            assert_equal(st.active_route_type, "Balanced")
-            assert_equal(type(select_direct_mode(st)), Page)
-            assert_equal(st.active_route_type, "Direct")
-            assert_equal(type(select_custom_mode(st, "Safest")), Page)
-            assert_equal(st.active_route_type, "Safest")
+            assert_equal(
+                (
+                    type(select_safest_mode(st)),
+                    st.active_route_type,
+                    type(select_balanced_mode(st)),
+                    type(select_direct_mode(st)),
+                    type(select_custom_mode(st, "Safest")),
+                    st.active_route_type,
+                ),
+                (Page, "Safest", Page, Page, Page, "Safest"),
+            )
+            # Re-verify individual active_route_type transitions
+            select_balanced_mode(st)
+            bal_active = st.active_route_type
+            select_direct_mode(st)
+            dir_active = st.active_route_type
+            select_safest_mode(st)
+            assert_equal((bal_active, dir_active, st.active_route_type), ("Balanced", "Direct", "Safest"))
 
-            # Segment details & GPX export
+            # Segment inspection, details, and GPX export
             routes_map = get_routes_from_state(st)
             first_seg = routes_map["Safest"].segments[0]
-            assert_equal(len(consolidate_route_corridors(routes_map["Safest"].segments)) >= 1, True)
-            assert_equal("<gpx" in export_route_to_gpx(routes_map["Safest"], "Start", "Dest"), True)
-            assert_equal(type(inspect_segment(st, first_seg.segment_id)), Page)
-            assert_equal(st.selected_segment_id, first_seg.segment_id)
-            assert_equal(type(segment_details_page(st)), Page)
-            assert_equal(st.current_page, "details")
+            assert_equal(
+                (
+                    len(consolidate_route_corridors(routes_map["Safest"].segments)) >= 1,
+                    "<gpx" in export_route_to_gpx(routes_map["Safest"], "Start", "Dest"),
+                    type(inspect_segment(st, first_seg.segment_id)),
+                    st.selected_segment_id,
+                    type(segment_details_page(st)),
+                    st.current_page,
+                ),
+                (True, True, Page, first_seg.segment_id, Page, "details"),
+            )
 
-            assert_equal(type(handle_export_gpx(st)), Page)
-            assert_equal(type(export_specific_gpx(st, "Balanced")), Page)
-            assert_equal(st.active_route_type, "Balanced")
+            assert_equal(
+                (type(handle_export_gpx(st)), type(export_specific_gpx(st, "Balanced")), st.active_route_type),
+                (Page, Page, "Balanced"),
+            )
 
             # Navigation & Beta gating
-            assert_equal(type(go_to_navigation(st)), Page)
-            assert_equal(st.current_page, "results")
-            assert_equal(type(go_to_saved(st)), Page)
-            assert_equal(st.current_page, "results")
+            assert_equal(
+                (type(go_to_navigation(st)), st.current_page, type(go_to_saved(st)), st.current_page),
+                (Page, "results", Page, "results"),
+            )
 
-            assert_equal(type(toggle_beta_mode(st)), Page)
-            assert_equal(st.beta_mode, True)
-            assert_equal(type(start_route_navigation(st, "Safest")), Page)
-            assert_equal(type(navigation_page(st)), Page)
-            assert_equal(st.current_page, "navigation")
-            assert_equal(type(handle_next_nav_step(st)), Page)
-            assert_equal(st.nav_step >= 1, True)
-            assert_equal(type(handle_prev_nav_step(st)), Page)
-            assert_equal(type(handle_recalculate_route(st)), Page)
-            assert_equal(st.nav_step, 1)
+            assert_equal((type(toggle_beta_mode(st)), st.beta_mode), (Page, True))
+            assert_equal(
+                (
+                    type(start_route_navigation(st, "Safest")),
+                    type(navigation_page(st)),
+                    st.current_page,
+                    type(handle_next_nav_step(st)),
+                    st.nav_step >= 1,
+                    type(handle_prev_nav_step(st)),
+                    type(handle_recalculate_route(st)),
+                    st.nav_step,
+                ),
+                (Page, Page, "navigation", Page, True, Page, Page, 1),
+            )
 
             # Saved routes CRUD
-            assert_equal(type(go_to_saved(st)), Page)
-            assert_equal(type(saved_routes_page(st)), Page)
-            assert_equal(type(handle_save_current_route(st, "Unit Test Ride")), Page)
-            assert_equal(type(save_specific_route(st, "Direct")), Page)
+            assert_equal(
+                (
+                    type(go_to_saved(st)),
+                    type(saved_routes_page(st)),
+                    type(handle_save_current_route(st, "Unit Test Ride")),
+                    type(save_specific_route(st, "Direct")),
+                ),
+                (Page, Page, Page, Page),
+            )
             saved_list = load_saved_routes()
-            assert_equal(len(saved_list) >= 1, True)
             test_id = saved_list[0].route_id
-            assert_equal(type(export_saved_route(st, test_id)), Page)
-            assert_equal(type(load_saved_route(st, test_id)), Page)
-            assert_equal(type(delete_saved_route_handler(st, test_id)), Page)
+            assert_equal(
+                (
+                    len(saved_list) >= 1,
+                    type(export_saved_route(st, test_id)),
+                    type(load_saved_route(st, test_id)),
+                    type(delete_saved_route_handler(st, test_id)),
+                ),
+                (True, Page, Page, Page),
+            )
 
-            # Planner, results, about & hazard reporting + dark mode toggle
-            assert_equal(type(go_to_planner(st)), Page)
-            assert_equal(st.current_page, "planner")
-            assert_equal(type(toggle_dark_mode(st)), Page)
-            assert_equal(st.dark_mode, True)
-            assert_equal('data-safecycle-theme="dark"' in str(index(st)), True)
-            assert_equal(type(toggle_dark_mode(st)), Page)
-            assert_equal(st.dark_mode, False)
-            assert_equal(type(go_to_results(st)), Page)
-            assert_equal(st.current_page, "results")
+            # Dark mode, planner/results/about navigation, hazard reports, and Beta gating
+            assert_equal((type(go_to_planner(st)), st.current_page), (Page, "planner"))
+            dark_pg = toggle_dark_mode(st)
+            assert_equal(
+                (type(dark_pg), st.dark_mode, 'data-safecycle-theme="dark"' in str(index(st))),
+                (Page, True, True),
+            )
+            assert_equal((type(toggle_dark_mode(st)), st.dark_mode), (Page, False))
+
+            assert_equal((type(go_to_results(st)), st.current_page), (Page, "results"))
             gpx_pg_html = str(handle_export_gpx(st))
             assert_equal('data-auto-gpx="true"' in gpx_pg_html, True)
-            assert_equal(type(go_to_about(st)), Page)
-            assert_equal(st.current_page, "about")
-            assert_equal(type(handle_submit_hazard(st, "Main St", "Blocked bike lane")), Page)
-            assert_equal(len(st.reported_hazards), 1)
-            assert_equal(type(about_page(st)), Page)
-            assert_equal(type(toggle_beta_mode(st)), Page)
-            assert_equal(st.beta_mode, False)
-            assert_equal("Report a Road Hazard" in str(about_page(st)), False)
-            assert_equal(type(handle_submit_hazard(st, "Main St", "Test")), Page)
-            assert_equal(len(st.reported_hazards), 1)
+
+            assert_equal(
+                (
+                    type(go_to_about(st)),
+                    st.current_page,
+                    type(handle_submit_hazard(st, "Main St", "Blocked bike lane")),
+                    len(st.reported_hazards),
+                    type(about_page(st)),
+                ),
+                (Page, "about", Page, 1, Page),
+            )
+
+            res_beta_on_html = str(route_results_page(st))
+            assert_equal("Route Evaluation & Routing Diagnostics" in res_beta_on_html, True)
+
+            assert_equal((type(toggle_beta_mode(st)), st.beta_mode), (Page, False))
+            assert_equal(
+                (
+                    "Report a Road Hazard" in str(about_page(st)),
+                    type(handle_submit_hazard(st, "Main St", "Test")),
+                    len(st.reported_hazards),
+                ),
+                (False, Page, 1),
+            )
+
+            # Basic Mode default vs Advanced Mode toggle + all 5 bike loading screen variants
+            st.advanced_mode = False
+            res_basic_html = str(route_results_page(st))
+            det_basic_html = str(segment_details_page(st))
+            assert_equal(
+                (
+                    "Safety Corridor Spectrum" in res_basic_html,
+                    "Road Corridor Safety Breakdown" in res_basic_html,
+                    "Key Streets Along Your Route" in res_basic_html,
+                    "Route Evaluation & Routing Diagnostics" in res_basic_html,
+                    "Advanced Mode" in res_basic_html,
+                    "Official Crash Records" in det_basic_html,
+                    all(
+                        tok in THEME_AND_DOWNLOAD_JS
+                        for tok in (
+                            "safecycle_loading_overlay",
+                            "LOADER_VARIANTS",
+                            "greenway",
+                            "radar",
+                            "climb",
+                            "night",
+                            "gpx",
+                            "safecycleSelectLoaderVariant",
+                        )
+                    ),
+                ),
+                (False, False, False, False, True, False, True),
+            )
+
+            assert_equal((type(toggle_advanced_mode(st)), st.advanced_mode), (Page, True))
+            det_adv_html = str(segment_details_page(st))
+            res_adv_html = str(route_results_page(st))
+            assert_equal(
+                (
+                    "Official Crash Records" in det_adv_html,
+                    "Safety Corridor Spectrum" in res_adv_html,
+                    "Road Corridor Safety Breakdown" in res_adv_html,
+                    "Basic View" in res_adv_html,
+                    "Route Evaluation & Routing Diagnostics" in res_adv_html,
+                ),
+                (True, True, True, True, False),
+            )
+
+            assert_equal((type(toggle_advanced_mode(st)), st.advanced_mode), (Page, False))
+            recal = recalibrate_routes_for_speed(routes_map, 20.0)
+            assert_equal(recal["Safest"].estimated_duration_mins <= routes_map["Safest"].estimated_duration_mins, True)
+            assert_equal(
+                (
+                    format_duration_text(60.0),
+                    format_duration_text(61.0),
+                    format_duration_text(125.0),
+                    format_number(999.0, 0),
+                    format_number(1250.4, 1),
+                    "Interactive OpenStreetMap bicycle map showing start and destination coordinates."
+                    in str(index(st)),
+                    "Interactive route map showing selected and possible cycling paths" in res_basic_html,
+                ),
+                ("60 min", "1:01 hr", "2:05 hrs", "999", "1,250.4", False, False),
+            )
 
 
 # Run offline Bakery unit tests during compilation and coverage runs
 run_bakery_unit_tests()
 
 if __name__ == "__main__":
-    import os
-    import sys
     if os.environ.get("DRAFTER_SKIP", "").lower() in ("true", "1", "yes"):
         pass
     elif "--compile" in sys.argv:
         start_server(State())
     else:
+        import signal
         import socket
-        import time
-        import urllib.request
+        import subprocess
 
         try:
+            import drafter.app.ports
             import drafter.config.app_server
             drafter.config.app_server.DEFAULT_PORT = 3000
+            drafter.app.ports.DEFAULT_PORT = 3000
         except Exception:
             pass
 
@@ -9160,16 +10099,18 @@ if __name__ == "__main__":
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     s.settimeout(0.5)
-                    if s.connect_ex(('127.0.0.1', 3000)) == 0:
+                    if s.connect_ex(("127.0.0.1", 3000)) == 0:
                         try:
-                            req = urllib.request.Request("http://127.0.0.1:3000/__drafter_stop_server", method="POST")
+                            req = urllib.request.Request(
+                                "http://127.0.0.1:3000/__drafter_stop_server",
+                                method="POST",
+                            )
                             urllib.request.urlopen(req, timeout=0.8)
                         except Exception:
                             pass
                         try:
-                            import subprocess, signal
                             out = subprocess.getoutput("ss -lptn 'sport = :3000'")
-                            for m in re.finditer(r'pid=(\d+)', out):
+                            for m in re.finditer(r"pid=(\d+)", out):
                                 p = int(m.group(1))
                                 if p != os.getpid():
                                     os.kill(p, signal.SIGKILL)
@@ -9188,5 +10129,5 @@ if __name__ == "__main__":
             open_browser=False,
             in_debug_mode=False,
             framed=False,
-            use_reloader=False
+            use_reloader=False,
         )

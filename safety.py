@@ -2,7 +2,7 @@
 safety.py - Road safety scoring engine and risk explanations for SafeCycle
 """
 from typing import Tuple, List, Optional
-from models import RoadSegment, CrashRecord
+from models import CrashRecord
 
 # Base design weights (must sum to 1.0)
 WEIGHT_INFRASTRUCTURE = 0.30

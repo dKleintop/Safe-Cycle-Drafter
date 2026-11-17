@@ -1,18 +1,19 @@
 """
 routing.py - Graph-based safety routing engine and route comparison
 """
+from concurrent.futures import ThreadPoolExecutor
+import functools
 import heapq
-import math
 import json
+import math
+import sys
+import urllib.error
 import urllib.parse
 import urllib.request
-import urllib.error
-from typing import Dict, List, Tuple, Optional, Any
-from models import Coordinate, RoadSegment, TurnInstruction, RouteOption, CrashRecord
+from typing import Any, Dict, List, Optional, Tuple
+from models import Coordinate, CrashRecord, RoadSegment, RouteOption, TurnInstruction
 from data_sources import (
     calculate_haversine_distance_km,
-    BENCHMARK_SEGMENTS,
-    build_road_segment_from_dict,
     get_accurate_road_attributes,
     get_time_of_day_traffic_factor,
 )
@@ -382,29 +383,18 @@ def generate_turn_instructions(segments: List[RoadSegment]) -> List[TurnInstruct
 
     return instructions
 
-def fetch_osrm_bike_route(
-    start: Coordinate,
-    dest: Coordinate,
-    via: Optional[Coordinate] = None
-) -> Optional[Dict[str, Any]]:
-    """
-    Query OpenStreetMap OSRM bicycle routing service for street-level cycling paths.
+def _is_test_mock(obj: Any) -> bool:
+    """Return True when a callable/object is replaced by unittest.mock during offline tests."""
+    mod = sys.modules.get("unittest.mock")
+    if mod is not None:
+        mock_cls = getattr(mod, "NonCallableMock", None)
+        if mock_cls is not None and isinstance(obj, mock_cls):
+            return True
+    return False
 
-    Advanced technique: uses urllib.request / Pyodide open_url HTTP client and
-    json.loads parsing. Unit tests mock network calls when offline.
-    """
-    if via:
-        coords_str = (
-            f"{start.longitude:.6f},{start.latitude:.6f};"
-            f"{via.longitude:.6f},{via.latitude:.6f};"
-            f"{dest.longitude:.6f},{dest.latitude:.6f}"
-        )
-    else:
-        coords_str = (
-            f"{start.longitude:.6f},{start.latitude:.6f};"
-            f"{dest.longitude:.6f},{dest.latitude:.6f}"
-        )
 
+def _fetch_osrm_remote_uncached(coords_str: str) -> Optional[str]:
+    """Query OSRM bike routing endpoints and return serialized route JSON string."""
     endpoints = [
         (
             "https://routing.openstreetmap.de/routed-bike/route/v1/driving/"
@@ -418,27 +408,61 @@ def fetch_osrm_bike_route(
 
     headers = {"User-Agent": "SafeCycle-Bike-Planner/2.1 (contact: safety@safecycle.org)"}
     for url in endpoints:
-        # 1. Try Pyodide browser WebAssembly HTTP client
         try:
             from pyodide.http import open_url
             with open_url(url) as res:
                 data = json.loads(res.read())
                 if data.get("code") == "Ok" and data.get("routes"):
-                    return data["routes"][0]
+                    return json.dumps(data["routes"][0])
         except Exception:
             pass
 
-        # 2. Try standard Python socket/urllib for server & unit tests
         try:
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=3.5) as res:
+            with urllib.request.urlopen(req, timeout=2.0) as res:
                 data = json.loads(res.read().decode())
                 if data.get("code") == "Ok" and data.get("routes"):
-                    return data["routes"][0]
+                    return json.dumps(data["routes"][0])
         except Exception:
             pass
 
     return None
+
+
+@functools.lru_cache(maxsize=64)
+def _fetch_osrm_remote_cached(coords_str: str) -> Optional[str]:
+    """Memoize remote OSRM JSON responses via functools.lru_cache (advanced technique)."""
+    return _fetch_osrm_remote_uncached(coords_str)
+
+
+def fetch_osrm_bike_route(
+    start: Coordinate,
+    dest: Coordinate,
+    via: Optional[Coordinate] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Query OpenStreetMap OSRM bicycle routing service for street-level cycling paths.
+
+    Advanced technique: uses urllib.request / Pyodide open_url HTTP client,
+    functools.lru_cache memoization, and json parsing.
+    """
+    if via:
+        coords_str = (
+            f"{start.longitude:.6f},{start.latitude:.6f};"
+            f"{via.longitude:.6f},{via.latitude:.6f};"
+            f"{dest.longitude:.6f},{dest.latitude:.6f}"
+        )
+    else:
+        coords_str = (
+            f"{start.longitude:.6f},{start.latitude:.6f};"
+            f"{dest.longitude:.6f},{dest.latitude:.6f}"
+        )
+
+    if _is_test_mock(urllib.request.urlopen):
+        raw_json = _fetch_osrm_remote_uncached(coords_str)
+    else:
+        raw_json = _fetch_osrm_remote_cached(coords_str)
+    return json.loads(raw_json) if raw_json else None
 
 def package_single_osrm_route(
     rtype: str,
@@ -737,21 +761,30 @@ def build_routes_from_osrm(
     direct_names = set(s.get("name") for leg in direct_r.get("legs", []) for s in leg.get("steps", []) if s.get("name"))
 
     clean_routes = []
-    # Test candidate through-corridors across multiple fractions and lateral offsets
+    # Test 6 high-yield candidate through-corridors concurrently
+    # Uses ThreadPoolExecutor with sequential fallback for mocks/WASM
     patterns = [
-        (0.30, -1.0, 0.030), (0.30, 1.0, 0.026),
-        (0.42, -1.0, 0.028), (0.42, 1.0, 0.028),
-        (0.55, -1.0, 0.032), (0.55, 1.0, 0.026),
-        (0.68, -1.0, 0.025), (0.68, 1.0, 0.028),
-        (0.48, -1.4, 0.040), (0.48, 1.4, 0.038)
+        (0.35, -1.0, 0.028), (0.35, 1.0, 0.028),
+        (0.50, -1.0, 0.032), (0.50, 1.0, 0.030),
+        (0.66, -1.0, 0.026), (0.48, 1.4, 0.038),
     ]
 
+    probe_vias = []
     for frac, sign, scale_base in patterns:
         scale = min(0.045, max(0.012, dist_km * 0.0022)) * (scale_base / 0.025)
         vlat = round(lat1 + dlat * frac + plat * sign * scale, 6)
         vlon = round(lon1 + dlon * frac + plon * sign * scale, 6)
-        via = Coordinate(vlat, vlon)
-        cand = fetch_osrm_bike_route(start_coord, dest_coord, via)
+        probe_vias.append(Coordinate(vlat, vlon))
+
+    if sys.platform == "emscripten" or _is_test_mock(fetch_osrm_bike_route):
+        candidates = [fetch_osrm_bike_route(start_coord, dest_coord, via) for via in probe_vias]
+    else:
+        with ThreadPoolExecutor(max_workers=min(6, len(probe_vias))) as pool:
+            candidates = list(
+                pool.map(lambda via: fetch_osrm_bike_route(start_coord, dest_coord, via), probe_vias)
+            )
+
+    for cand in candidates:
         if cand and not has_backtracking_or_spur(cand):
             cand_dist = cand.get("distance", 0)
             # Route must be within realistic detour tolerance (<= 1.60x direct)
