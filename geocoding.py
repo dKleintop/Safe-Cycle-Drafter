@@ -17,7 +17,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Louis Redding Hall, Newark, DE",
         "city": "Newark, DE",
         "category": "Campus Corridor",
-        "icon": "🎓",
+        "icon": "campus",
         "desc": "University of Delaware campus cycle corridor along S College Ave",
         "lat": 39.676456, "lon": -75.747050
     },
@@ -25,7 +25,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Kirkwood, DE",
         "city": "Kirkwood, DE",
         "category": "Trail Endpoint",
-        "icon": "🎯",
+        "icon": "target",
         "desc": "Kirkwood community and C&D Canal trailhead connector",
         "lat": 39.571807, "lon": -75.696079
     },
@@ -33,7 +33,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "University of Delaware, Newark, DE",
         "city": "Newark, DE",
         "category": "Campus Corridor",
-        "icon": "🏫",
+        "icon": "campus",
         "desc": "The Green and University of Delaware Newark cycling hub",
         "lat": 39.678044, "lon": -75.750668
     },
@@ -41,7 +41,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Lums Pond State Park, DE",
         "city": "Kirkwood, DE",
         "category": "Park Route",
-        "icon": "🌲",
+        "icon": "park",
         "desc": "Scenic perimeter trail and cycling loops around Lums Pond",
         "lat": 39.559389, "lon": -75.719335
     },
@@ -49,7 +49,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Glasgow Park, Newark, DE",
         "city": "Newark, DE",
         "category": "Park Route",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Dedicated multi-use paved cycling loop along Route 40 & Route 896",
         "lat": 39.610684, "lon": -75.729030
     },
@@ -57,7 +57,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Wilmington Riverfront, DE",
         "city": "Wilmington, DE",
         "category": "Greenway Path",
-        "icon": "🌊",
+        "icon": "water",
         "desc": "Christina Riverfront bike path connecting to Jack A. Markell Trail",
         "lat": 39.734842, "lon": -75.556214
     },
@@ -66,7 +66,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Central Park South, New York, NY",
         "city": "New York, NY",
         "category": "Park Route",
-        "icon": "🌳",
+        "icon": "park",
         "desc": "Gateway to Central Park scenic cycle drives and crosstown paths",
         "lat": 40.7661, "lon": -73.9772
     },
@@ -74,7 +74,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Brooklyn Bridge (Manhattan Side), NY",
         "city": "New York, NY",
         "category": "Bridge Bikeway",
-        "icon": "🌉",
+        "icon": "bridge",
         "desc": "Dedicated two-way grade-separated cycle track over the East River",
         "lat": 40.7126, "lon": -74.0048
     },
@@ -82,7 +82,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Brooklyn Bridge (DUMBO / Brooklyn Side), NY",
         "city": "New York, NY",
         "category": "Bridge Bikeway",
-        "icon": "🌉",
+        "icon": "bridge",
         "desc": "Access point to Brooklyn waterfront greenway and Brooklyn Bridge Park",
         "lat": 40.7028, "lon": -73.9928
     },
@@ -90,7 +90,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Hudson River Greenway at 72nd St, NY",
         "city": "New York, NY",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Premier off-street grade-separated waterfront bike highway",
         "lat": 40.7818, "lon": -73.9877
     },
@@ -98,7 +98,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Hudson River Greenway at Chelsea Piers (23rd St), NY",
         "city": "New York, NY",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Scenic waterfront path separated from motorized highway traffic",
         "lat": 40.7485, "lon": -74.0080
     },
@@ -106,7 +106,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Hudson River Greenway at Battery Park, NY",
         "city": "New York, NY",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Southern tip connection to East River Bikeway and Staten Island Ferry",
         "lat": 40.7033, "lon": -74.0170
     },
@@ -114,7 +114,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Prospect Park West, Brooklyn, NY",
         "city": "New York, NY",
         "category": "Park Route",
-        "icon": "🌳",
+        "icon": "park",
         "desc": "Grand Army Plaza gateway and car-free Prospect Park interior loop",
         "lat": 40.6655, "lon": -73.9776
     },
@@ -122,7 +122,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Williamsburg Bridge Bike Path (Manhattan Ramp), NY",
         "city": "New York, NY",
         "category": "Bridge Bikeway",
-        "icon": "🌉",
+        "icon": "bridge",
         "desc": "Dedicated grade-separated cycleway connecting Lower East Side & Brooklyn",
         "lat": 40.7183, "lon": -73.9872
     },
@@ -130,7 +130,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Manhattan Bridge Bikeway (Canal St), NY",
         "city": "New York, NY",
         "category": "Bridge Bikeway",
-        "icon": "🌉",
+        "icon": "bridge",
         "desc": "North side protected bicycle lane into Downtown Brooklyn",
         "lat": 40.7155, "lon": -73.9945
     },
@@ -138,7 +138,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Times Square, New York, NY",
         "city": "New York, NY",
         "category": "City Landmark",
-        "icon": "🏙️",
+        "icon": "city",
         "desc": "Broadway pedestrian plaza and shared cyclist avenue corridor",
         "lat": 40.7580, "lon": -73.9855
     },
@@ -146,7 +146,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Union Square South, New York, NY",
         "city": "New York, NY",
         "category": "City Landmark",
-        "icon": "🏙️",
+        "icon": "city",
         "desc": "Major crosstown bicycle hub connecting Broadway and 14th St paths",
         "lat": 40.7359, "lon": -73.9911
     },
@@ -154,7 +154,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Washington Square Park, New York, NY",
         "city": "New York, NY",
         "category": "Park Route",
-        "icon": "🌳",
+        "icon": "park",
         "desc": "Greenwich Village car-free park perimeter and 5th Ave starting point",
         "lat": 40.7308, "lon": -73.9973
     },
@@ -162,7 +162,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Grand Central Terminal, New York, NY",
         "city": "New York, NY",
         "category": "Transit Hub",
-        "icon": "🚆",
+        "icon": "transit",
         "desc": "Park Ave viaduct junction and East Midtown commuting nexus",
         "lat": 40.7527, "lon": -73.9772
     },
@@ -170,7 +170,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Penn Station / Moynihan Train Hall, NY",
         "city": "New York, NY",
         "category": "Transit Hub",
-        "icon": "🚆",
+        "icon": "transit",
         "desc": "Major transit terminal with 8th Ave and 9th Ave protected bike lanes",
         "lat": 40.7506, "lon": -73.9935
     },
@@ -178,7 +178,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Flushing Meadows Corona Park, Queens, NY",
         "city": "New York, NY",
         "category": "Park Route",
-        "icon": "🌳",
+        "icon": "park",
         "desc": "Expansive paved greenway loops around Meadow Lake and Unisphere",
         "lat": 40.7498, "lon": -73.8465
     },
@@ -188,7 +188,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Market St at 4th St, San Francisco, CA",
         "city": "San Francisco, CA",
         "category": "City Landmark",
-        "icon": "🏙️",
+        "icon": "city",
         "desc": "Car-free Better Market Street bicycle corridor and transit arterial",
         "lat": 37.7858, "lon": -122.4065
     },
@@ -196,7 +196,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Golden Gate Park Panhandle, San Francisco, CA",
         "city": "San Francisco, CA",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Tree-lined protected cycle boulevard leading into JFK Promenade",
         "lat": 37.7719, "lon": -122.4468
     },
@@ -204,7 +204,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "The Embarcadero at Ferry Building, SF, CA",
         "city": "San Francisco, CA",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Wide waterfront promenade with separated bayside bike paths",
         "lat": 37.7955, "lon": -122.3937
     },
@@ -212,7 +212,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Golden Gate Bridge South Vista Point, SF, CA",
         "city": "San Francisco, CA",
         "category": "Bridge Bikeway",
-        "icon": "🌉",
+        "icon": "bridge",
         "desc": "Iconic world-famous bicycle crossing into Marin County Headlands",
         "lat": 37.8078, "lon": -122.4751
     },
@@ -220,7 +220,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Valencia St Bikeway (16th St), San Francisco, CA",
         "city": "San Francisco, CA",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Mission District center-running cycle track with bicycle signals",
         "lat": 37.7650, "lon": -122.4219
     },
@@ -228,7 +228,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Crissy Field Promenade, San Francisco, CA",
         "city": "San Francisco, CA",
         "category": "Park Route",
-        "icon": "🌳",
+        "icon": "park",
         "desc": "Flat bayside multi-use path with sweeping bridge views",
         "lat": 37.8045, "lon": -122.4660
     },
@@ -238,7 +238,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Seattle Waterfront / Pike Place, WA",
         "city": "Seattle, WA",
         "category": "City Landmark",
-        "icon": "🏙️",
+        "icon": "city",
         "desc": "New Alaskan Way protected bicycle pathway and Elliott Bay Trail",
         "lat": 47.6097, "lon": -122.3421
     },
@@ -246,7 +246,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Burke-Gilman Trail at UW, Seattle, WA",
         "city": "Seattle, WA",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "27-mile continuous multi-use rail-trail connecting northern Seattle",
         "lat": 47.6538, "lon": -122.3078
     },
@@ -254,7 +254,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Portland Waterfront Park, OR",
         "city": "Portland, OR",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Governor Tom McCall Waterfront Park and Willamette river loop",
         "lat": 45.5186, "lon": -122.6738
     },
@@ -262,7 +262,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Tilikum Crossing (Bridge of the People), Portland, OR",
         "city": "Portland, OR",
         "category": "Bridge Bikeway",
-        "icon": "🌉",
+        "icon": "bridge",
         "desc": "Car-free cable-stayed bridge reserved exclusively for bikes, transit & walkers",
         "lat": 45.5053, "lon": -122.6663
     },
@@ -272,7 +272,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Chicago Lakefront Trail at Navy Pier, IL",
         "city": "Chicago, IL",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "18.5-mile grade-separated lakefront trail with dedicated bike lanes",
         "lat": 41.8917, "lon": -87.6086
     },
@@ -280,7 +280,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Charles River Esplanade, Boston, MA",
         "city": "Boston, MA",
         "category": "Park Route",
-        "icon": "🌳",
+        "icon": "park",
         "desc": "Continuous river path connecting Boston and Cambridge without cross-traffic",
         "lat": 42.3554, "lon": -71.0776
     },
@@ -288,7 +288,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "National Mall / Lincoln Memorial Bikeway, Washington, DC",
         "city": "Washington, DC",
         "category": "City Landmark",
-        "icon": "🏙️",
+        "icon": "city",
         "desc": "Monumental wide cycleways connecting Capitol Hill and Potomac riverfront",
         "lat": 38.8893, "lon": -77.0502
     },
@@ -296,7 +296,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Mount Vernon Trail at Georgetown, Washington, DC",
         "city": "Washington, DC",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Paved scenic trail running south along the western bank of Potomac",
         "lat": 38.9036, "lon": -77.0673
     },
@@ -304,7 +304,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Lady Bird Lake Trail at Pfluger Bridge, Austin, TX",
         "city": "Austin, TX",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Scenic Ann and Roy Butler Boardwalk and dedicated pedestrian/bike bridge",
         "lat": 30.2644, "lon": -97.7533
     }

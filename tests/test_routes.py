@@ -2,6 +2,7 @@
 tests/test_routes.py - Unit tests covering all 38 Drafter @route functions in main.py
 """
 import os
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -324,6 +325,73 @@ class TestAllDrafterRoutes(unittest.TestCase):
                 "Interactive route map showing selected and possible cycling paths",
                 results_html,
             )
+
+    def test_ui_overhaul_layout_zero_emojis_and_clean_copy(self) -> None:
+        """Verify split single-overview results layout, trimmed helper copy, and zero emojis."""
+        emoji_re = re.compile(
+            r"[\U0001F000-\U0001FAFF\u2600-\u27BF\u23E9-\u23FA\u2B50\u2B55]"
+        )
+        with (
+            patch.object(main, "fetch_osrm_bike_routes", return_value=[]),
+            patch("urllib.request.urlopen", side_effect=OSError("offline test")),
+            patch.object(main, "SAVED_ROUTES_FILE", self.tmp_saved_file),
+        ):
+            st = main.State()
+            planner_html = str(main.index(st))
+            for stale_copy in (
+                "Street address, trail trailhead",
+                "Destination address, park, landmark",
+                "Auto-formats to 00:00",
+                "Type cycling pace in mph",
+            ):
+                self.assertNotIn(stale_copy, planner_html)
+            self.assertIn("sc-planner-grid", planner_html)
+            self.assertEqual(emoji_re.findall(planner_html), [])
+
+            # Basic view results: split map + single overview slot active
+            res_basic = str(main.handle_generate_route(st))
+            self.assertIn("sc-results-split", res_basic)
+            self.assertIn("sc-overview-panel", res_basic)
+            self.assertIn("sc-switch-tabs", res_basic)
+            flex_count = res_basic.count('class="sc-overview-slot" style="display: flex;"')
+            none_count = res_basic.count('class="sc-overview-slot" style="display: none;"')
+            self.assertEqual(flex_count, 1)
+            self.assertGreaterEqual(none_count, 2)
+            self.assertEqual(emoji_re.findall(res_basic), [])
+
+            # Switching active route moves display: flex to that slot only
+            main.select_balanced_mode(st)
+            res_balanced = str(main.route_results_page(st))
+            self.assertEqual(
+                res_balanced.count('class="sc-overview-slot" style="display: flex;"'),
+                1,
+            )
+            self.assertIn(
+                'id="route_overview_slot_Balanced" class="sc-overview-slot" style="display: flex;"',
+                res_balanced,
+            )
+            self.assertIn(
+                'id="route_overview_slot_Safest" class="sc-overview-slot" style="display: none;"',
+                res_balanced,
+            )
+
+            # Advanced + Beta modes and secondary pages contain zero emojis & trimmed helper text
+            main.toggle_advanced_mode(st)
+            main.toggle_beta_mode(st)
+            res_adv_beta = str(main.route_results_page(st))
+            self.assertNotIn("00:00 format", res_adv_beta)
+            self.assertNotIn("e.g. 12.0 or 15", res_adv_beta)
+            self.assertEqual(emoji_re.findall(res_adv_beta), [])
+
+            routes = main.get_routes_from_state(st)
+            seg_id = routes["Balanced"].segments[0].segment_id
+            for page_html in (
+                str(main.inspect_segment(st, seg_id)),
+                str(main.start_route_navigation(st, "Balanced")),
+                str(main.go_to_saved(st)),
+                str(main.go_to_about(st)),
+            ):
+                self.assertEqual(emoji_re.findall(page_html), [])
 
 
 if __name__ == "__main__":

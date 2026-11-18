@@ -323,7 +323,7 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
             "multiplier": 1.45,
             "label": "Morning Rush Hour (Peak Commute)",
             "advisory": (
-                "🚗 Peak Commute Active: Motor vehicle traffic is elevated on arterial "
+                "Peak Commute Active: Motor vehicle traffic is elevated on arterial "
                 "corridors. Safest route with off-street trails is strongly recommended."
             ),
             "speed_display_note": "Morning Peak"
@@ -335,7 +335,7 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
             "multiplier": 1.50,
             "label": "Evening Rush Hour (High Collision Risk)",
             "advisory": (
-                "⚠️ Evening Rush Hour: Heavy vehicular congestion, frequent intersection "
+                "Evening Rush Hour: Heavy vehicular congestion, frequent intersection "
                 "turn conflicts. Protected bicycle infrastructure highly advised."
             ),
             "speed_display_note": "Evening Peak"
@@ -347,7 +347,7 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
             "multiplier": 1.15,
             "label": "Afternoon (Active School Zones)",
             "advisory": (
-                "🚌 Afternoon Traffic: Watch for school buses and local neighborhood "
+                "Afternoon Traffic: Watch for school buses and local neighborhood "
                 "cross-traffic."
             ),
             "speed_display_note": "School Hours"
@@ -359,7 +359,7 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
             "multiplier": 0.80,
             "label": "Night (Low Traffic Volume)",
             "advisory": (
-                "🌙 Low vehicular traffic, but drivers travel at higher speeds. "
+                "Low vehicular traffic, but drivers travel at higher speeds. "
                 "High-visibility lights and reflective clothing essential."
             ),
             "speed_display_note": "Night Hours"
@@ -371,7 +371,7 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
             "multiplier": 1.0,
             "label": "Mid-Day (Standard Traffic Flow)",
             "advisory": (
-                "☀️ Daylight riding conditions with standard mid-day commercial "
+                "Daylight riding conditions with standard mid-day commercial "
                 "traffic flow."
             ),
             "speed_display_note": "Mid-Day"

@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 .python_packages/
+.py311_packages/
 .venv/
 
 # Python cache & compiled files

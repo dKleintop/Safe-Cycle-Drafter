@@ -321,10 +321,10 @@ class TestSavedRoutesPersistence(unittest.TestCase):
             res_off = str(main.route_results_page(s))
             self.assertNotIn("Save Route to Favorites", res_off)
             self.assertNotIn("Beta Mode:", res_off)
-            self.assertIn("Export GPX File", res_off)
+            self.assertIn("Export GPX", res_off)
 
             det_off = str(main.segment_details_page(s))
-            self.assertNotIn("Save This Route to Favorites", det_off)
+            self.assertNotIn("Save Current Route", det_off)
             self.assertNotIn("Beta Mode:", det_off)
             self.assertIn("Export GPX Track", det_off)
 
@@ -333,15 +333,15 @@ class TestSavedRoutesPersistence(unittest.TestCase):
             self.assertTrue(s.beta_mode)
 
             nav_on = str(main.render_navbar("planner", s.beta_mode, s))
-            self.assertIn("Saved Routes", nav_on)
-            self.assertIn("Save Route (Beta)", nav_on)
+            self.assertIn("Saved (", nav_on)
+            self.assertIn("Save Route", nav_on)
 
             res_on = str(main.route_results_page(s))
-            self.assertIn("Save Route to Favorites (Beta)", res_on)
-            self.assertIn("Export GPX File", res_on)
+            self.assertIn("Save Route", res_on)
+            self.assertIn("Export GPX", res_on)
 
             det_on = str(main.segment_details_page(s))
-            self.assertIn("Save This Route to Favorites (Beta)", det_on)
+            self.assertIn("Save Current Route", det_on)
             self.assertIn("Export GPX Track", det_on)
 
             # Accessing Saved Routes page works in Beta Mode

@@ -1,31 +1,30 @@
-from bakery import assert_equal
 """
 app.py - SafeCycle: A Safety-First Bike GPS and Route Planner
 Built with Python Drafter web framework.
 """
-import sys
 import os
+import sys
+
 
 def _configure_runtime_environment() -> None:
     """
-    Configure DRAFTER_ENTRY and local .python_packages path on startup.
+    Configure DRAFTER_ENTRY and local Python package paths on startup.
 
-    Uses sys/os introspection (advanced environment setup beyond CISC108 basics)
-    so both local server execution and browser Pyodide run smoothly.
+    Prefers .py311_packages when present so Python 3.11 native wheels take
+    precedence over legacy .python_packages overlays.
     """
     current_file = globals().get("__file__") or "app.py"
+    base_dir = os.path.dirname(os.path.abspath(current_file))
     try:
         os.environ["DRAFTER_ENTRY"] = os.path.abspath(current_file)
     except Exception:
         pass
 
     try:
-        pkg_dir = os.path.join(
-            os.path.dirname(os.path.abspath(current_file)),
-            ".python_packages",
-        )
-        if os.path.exists(pkg_dir) and pkg_dir not in sys.path:
-            sys.path.insert(0, pkg_dir)
+        for folder in (".python_packages", ".py311_packages"):
+            pkg_dir = os.path.join(base_dir, folder)
+            if os.path.exists(pkg_dir) and pkg_dir not in sys.path:
+                sys.path.insert(0, pkg_dir)
     except Exception:
         pass
 
@@ -33,30 +32,47 @@ def _configure_runtime_environment() -> None:
 _configure_runtime_environment()
 
 try:
+    from bakery import assert_equal
     from drafter import *
 except ImportError:
-    try:
+    if sys.platform != "emscripten":
+        import shutil
         import subprocess
         _entry_file = globals().get("__file__") or "app.py"
-        _pkg_dir = os.path.join(
-            os.path.dirname(os.path.abspath(_entry_file)),
-            ".python_packages",
-        )
-        try:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "--target=" + _pkg_dir, "drafter"]
-            )
-        except Exception:
-            subprocess.check_call(
-                "curl -sS https://bootstrap.pypa.io/get-pip.py | python3 - && "
-                "python3 -m pip install --target=" + _pkg_dir + " drafter",
-                shell=True,
-            )
+        _base_dir = os.path.dirname(os.path.abspath(_entry_file))
+        _pkg_dir = os.path.join(_base_dir, ".py311_packages")
+        _legacy_dir = os.path.join(_base_dir, ".python_packages")
+        if _legacy_dir in sys.path:
+            sys.path.remove(_legacy_dir)
+        for _mod in list(sys.modules.keys()):
+            if _mod == "PIL" or _mod.startswith(("PIL.", "drafter", "bakery")):
+                sys.modules.pop(_mod, None)
+        if not os.path.exists(os.path.join(_pkg_dir, "drafter")):
+            shutil.rmtree(_pkg_dir, ignore_errors=True)
+            _pkgs = [
+                "drafter", "bakery", "pillow", "uvicorn", "starlette",
+                "anyio", "h11", "click", "jinja2", "markupsafe",
+                "typing_extensions", "requests", "urllib3", "certifi",
+                "charset_normalizer", "idna", "watchfiles",
+            ]
+            try:
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install", "-q",
+                    "--no-deps", "--target=" + _pkg_dir, *_pkgs,
+                ])
+            except Exception:
+                _pip_url = "https://bootstrap.pypa.io/pip/pip.pyz"
+                _pip_zip = "/tmp/sc_pip.pyz"
+                subprocess.check_call(
+                    f"curl -sSL {_pip_url} -o {_pip_zip} && "
+                    f"{sys.executable} {_pip_zip} install -q --no-deps "
+                    f"--target={_pkg_dir} {' '.join(_pkgs)} && rm -f {_pip_zip}",
+                    shell=True,
+                )
         if _pkg_dir not in sys.path:
             sys.path.insert(0, _pkg_dir)
-        from drafter import *
-    except Exception:
-        pass
+    from bakery import assert_equal
+    from drafter import *
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
@@ -510,8 +526,8 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
             "multiplier": 1.45,
             "label": "Morning Rush Hour (Peak Commute)",
             "advisory": (
-                "🚗 Peak Commute Active: Motor vehicle traffic is elevated on arterial corridors. "
-                "Safest route with off-street trails is strongly recommended."
+                "Peak commute traffic active on arterial corridors. "
+                "Off-street trails recommended."
             ),
             "speed_display_note": "Morning Peak"
         }
@@ -522,8 +538,8 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
             "multiplier": 1.50,
             "label": "Evening Rush Hour (High Collision Risk)",
             "advisory": (
-                "⚠️ Evening Rush Hour: Heavy vehicular congestion, frequent intersection turn conflicts. "
-                "Protected bicycle infrastructure highly advised."
+                "Evening rush hour congestion with frequent intersection turn conflicts. "
+                "Protected bikeways advised."
             ),
             "speed_display_note": "Evening Peak"
         }
@@ -533,7 +549,7 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
             "is_rush_hour": False,
             "multiplier": 1.15,
             "label": "Afternoon (Active School Zones)",
-            "advisory": "🚌 Afternoon Traffic: Watch for school buses and local neighborhood cross-traffic.",
+            "advisory": "Afternoon school zone traffic; watch for cross-street turns.",
             "speed_display_note": "School Hours"
         }
     elif 19 <= h or h <= 6:
@@ -543,8 +559,8 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
             "multiplier": 0.80,
             "label": "Night (Low Traffic Volume)",
             "advisory": (
-                "🌙 Low vehicular traffic, but drivers travel at higher speeds. "
-                "High-visibility lights and reflective clothing essential."
+                "Lower traffic volume with faster motor speeds. "
+                "Front and rear lights essential."
             ),
             "speed_display_note": "Night Hours"
         }
@@ -554,7 +570,7 @@ def get_time_of_day_traffic_factor(start_time_str: str) -> Dict[str, Any]:
             "is_rush_hour": False,
             "multiplier": 1.0,
             "label": "Mid-Day (Standard Traffic Flow)",
-            "advisory": "☀️ Daylight riding conditions with standard mid-day commercial traffic flow.",
+            "advisory": "Daylight riding conditions with standard mid-day traffic flow.",
             "speed_display_note": "Mid-Day"
         }
 
@@ -1342,7 +1358,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Louis Redding Hall, Newark, DE",
         "city": "Newark, DE",
         "category": "Campus Corridor",
-        "icon": "🎓",
+        "icon": "campus",
         "desc": "University of Delaware campus cycle corridor along S College Ave",
         "lat": 39.676456, "lon": -75.747050
     },
@@ -1350,7 +1366,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Kirkwood, DE",
         "city": "Kirkwood, DE",
         "category": "Trail Endpoint",
-        "icon": "🎯",
+        "icon": "target",
         "desc": "Kirkwood community and C&D Canal trailhead connector",
         "lat": 39.571807, "lon": -75.696079
     },
@@ -1358,7 +1374,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "University of Delaware, Newark, DE",
         "city": "Newark, DE",
         "category": "Campus Corridor",
-        "icon": "🏫",
+        "icon": "campus",
         "desc": "The Green and University of Delaware Newark cycling hub",
         "lat": 39.678044, "lon": -75.750668
     },
@@ -1366,7 +1382,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Lums Pond State Park, DE",
         "city": "Kirkwood, DE",
         "category": "Park Route",
-        "icon": "🌲",
+        "icon": "park",
         "desc": "Scenic perimeter trail and cycling loops around Lums Pond",
         "lat": 39.559389, "lon": -75.719335
     },
@@ -1374,7 +1390,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Glasgow Park, Newark, DE",
         "city": "Newark, DE",
         "category": "Park Route",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Dedicated multi-use paved cycling loop along Route 40 & Route 896",
         "lat": 39.610684, "lon": -75.729030
     },
@@ -1382,7 +1398,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Wilmington Riverfront, DE",
         "city": "Wilmington, DE",
         "category": "Greenway Path",
-        "icon": "🌊",
+        "icon": "water",
         "desc": "Christina Riverfront bike path connecting to Jack A. Markell Trail",
         "lat": 39.734842, "lon": -75.556214
     },
@@ -1391,7 +1407,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Central Park South, New York, NY",
         "city": "New York, NY",
         "category": "Park Route",
-        "icon": "🌳",
+        "icon": "park",
         "desc": "Gateway to Central Park scenic cycle drives and crosstown paths",
         "lat": 40.7661, "lon": -73.9772
     },
@@ -1399,7 +1415,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Brooklyn Bridge (Manhattan Side), NY",
         "city": "New York, NY",
         "category": "Bridge Bikeway",
-        "icon": "🌉",
+        "icon": "bridge",
         "desc": "Dedicated two-way grade-separated cycle track over the East River",
         "lat": 40.7126, "lon": -74.0048
     },
@@ -1407,7 +1423,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Brooklyn Bridge (DUMBO / Brooklyn Side), NY",
         "city": "New York, NY",
         "category": "Bridge Bikeway",
-        "icon": "🌉",
+        "icon": "bridge",
         "desc": "Access point to Brooklyn waterfront greenway and Brooklyn Bridge Park",
         "lat": 40.7028, "lon": -73.9928
     },
@@ -1415,7 +1431,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Hudson River Greenway at 72nd St, NY",
         "city": "New York, NY",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Premier off-street grade-separated waterfront bike highway",
         "lat": 40.7818, "lon": -73.9877
     },
@@ -1423,7 +1439,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Hudson River Greenway at Chelsea Piers (23rd St), NY",
         "city": "New York, NY",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Scenic waterfront path separated from motorized highway traffic",
         "lat": 40.7485, "lon": -74.0080
     },
@@ -1431,7 +1447,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Hudson River Greenway at Battery Park, NY",
         "city": "New York, NY",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Southern tip connection to East River Bikeway and Staten Island Ferry",
         "lat": 40.7033, "lon": -74.0170
     },
@@ -1439,7 +1455,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Prospect Park West, Brooklyn, NY",
         "city": "New York, NY",
         "category": "Park Route",
-        "icon": "🌳",
+        "icon": "park",
         "desc": "Grand Army Plaza gateway and car-free Prospect Park interior loop",
         "lat": 40.6655, "lon": -73.9776
     },
@@ -1447,7 +1463,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Williamsburg Bridge Bike Path (Manhattan Ramp), NY",
         "city": "New York, NY",
         "category": "Bridge Bikeway",
-        "icon": "🌉",
+        "icon": "bridge",
         "desc": "Dedicated grade-separated cycleway connecting Lower East Side & Brooklyn",
         "lat": 40.7183, "lon": -73.9872
     },
@@ -1455,7 +1471,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Manhattan Bridge Bikeway (Canal St), NY",
         "city": "New York, NY",
         "category": "Bridge Bikeway",
-        "icon": "🌉",
+        "icon": "bridge",
         "desc": "North side protected bicycle lane into Downtown Brooklyn",
         "lat": 40.7155, "lon": -73.9945
     },
@@ -1463,7 +1479,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Times Square, New York, NY",
         "city": "New York, NY",
         "category": "City Landmark",
-        "icon": "🏙️",
+        "icon": "city",
         "desc": "Broadway pedestrian plaza and shared cyclist avenue corridor",
         "lat": 40.7580, "lon": -73.9855
     },
@@ -1471,7 +1487,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Union Square South, New York, NY",
         "city": "New York, NY",
         "category": "City Landmark",
-        "icon": "🏙️",
+        "icon": "city",
         "desc": "Major crosstown bicycle hub connecting Broadway and 14th St paths",
         "lat": 40.7359, "lon": -73.9911
     },
@@ -1479,7 +1495,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Washington Square Park, New York, NY",
         "city": "New York, NY",
         "category": "Park Route",
-        "icon": "🌳",
+        "icon": "park",
         "desc": "Greenwich Village car-free park perimeter and 5th Ave starting point",
         "lat": 40.7308, "lon": -73.9973
     },
@@ -1487,7 +1503,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Grand Central Terminal, New York, NY",
         "city": "New York, NY",
         "category": "Transit Hub",
-        "icon": "🚆",
+        "icon": "transit",
         "desc": "Park Ave viaduct junction and East Midtown commuting nexus",
         "lat": 40.7527, "lon": -73.9772
     },
@@ -1495,7 +1511,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Penn Station / Moynihan Train Hall, NY",
         "city": "New York, NY",
         "category": "Transit Hub",
-        "icon": "🚆",
+        "icon": "transit",
         "desc": "Major transit terminal with 8th Ave and 9th Ave protected bike lanes",
         "lat": 40.7506, "lon": -73.9935
     },
@@ -1503,7 +1519,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Flushing Meadows Corona Park, Queens, NY",
         "city": "New York, NY",
         "category": "Park Route",
-        "icon": "🌳",
+        "icon": "park",
         "desc": "Expansive paved greenway loops around Meadow Lake and Unisphere",
         "lat": 40.7498, "lon": -73.8465
     },
@@ -1513,7 +1529,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Market St at 4th St, San Francisco, CA",
         "city": "San Francisco, CA",
         "category": "City Landmark",
-        "icon": "🏙️",
+        "icon": "city",
         "desc": "Car-free Better Market Street bicycle corridor and transit arterial",
         "lat": 37.7858, "lon": -122.4065
     },
@@ -1521,7 +1537,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Golden Gate Park Panhandle, San Francisco, CA",
         "city": "San Francisco, CA",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Tree-lined protected cycle boulevard leading into JFK Promenade",
         "lat": 37.7719, "lon": -122.4468
     },
@@ -1529,7 +1545,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "The Embarcadero at Ferry Building, SF, CA",
         "city": "San Francisco, CA",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Wide waterfront promenade with separated bayside bike paths",
         "lat": 37.7955, "lon": -122.3937
     },
@@ -1537,7 +1553,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Golden Gate Bridge South Vista Point, SF, CA",
         "city": "San Francisco, CA",
         "category": "Bridge Bikeway",
-        "icon": "🌉",
+        "icon": "bridge",
         "desc": "Iconic world-famous bicycle crossing into Marin County Headlands",
         "lat": 37.8078, "lon": -122.4751
     },
@@ -1545,7 +1561,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Valencia St Bikeway (16th St), San Francisco, CA",
         "city": "San Francisco, CA",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Mission District center-running cycle track with bicycle signals",
         "lat": 37.7650, "lon": -122.4219
     },
@@ -1553,7 +1569,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Crissy Field Promenade, San Francisco, CA",
         "city": "San Francisco, CA",
         "category": "Park Route",
-        "icon": "🌳",
+        "icon": "park",
         "desc": "Flat bayside multi-use path with sweeping bridge views",
         "lat": 37.8045, "lon": -122.4660
     },
@@ -1563,7 +1579,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Seattle Waterfront / Pike Place, WA",
         "city": "Seattle, WA",
         "category": "City Landmark",
-        "icon": "🏙️",
+        "icon": "city",
         "desc": "New Alaskan Way protected bicycle pathway and Elliott Bay Trail",
         "lat": 47.6097, "lon": -122.3421
     },
@@ -1571,7 +1587,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Burke-Gilman Trail at UW, Seattle, WA",
         "city": "Seattle, WA",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "27-mile continuous multi-use rail-trail connecting northern Seattle",
         "lat": 47.6538, "lon": -122.3078
     },
@@ -1579,7 +1595,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Portland Waterfront Park, OR",
         "city": "Portland, OR",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Governor Tom McCall Waterfront Park and Willamette river loop",
         "lat": 45.5186, "lon": -122.6738
     },
@@ -1587,7 +1603,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Tilikum Crossing (Bridge of the People), Portland, OR",
         "city": "Portland, OR",
         "category": "Bridge Bikeway",
-        "icon": "🌉",
+        "icon": "bridge",
         "desc": "Car-free cable-stayed bridge reserved exclusively for bikes, transit & walkers",
         "lat": 45.5053, "lon": -122.6663
     },
@@ -1597,7 +1613,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Chicago Lakefront Trail at Navy Pier, IL",
         "city": "Chicago, IL",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "18.5-mile grade-separated lakefront trail with dedicated bike lanes",
         "lat": 41.8917, "lon": -87.6086
     },
@@ -1605,7 +1621,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Charles River Esplanade, Boston, MA",
         "city": "Boston, MA",
         "category": "Park Route",
-        "icon": "🌳",
+        "icon": "park",
         "desc": "Continuous river path connecting Boston and Cambridge without cross-traffic",
         "lat": 42.3554, "lon": -71.0776
     },
@@ -1613,7 +1629,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "National Mall / Lincoln Memorial Bikeway, Washington, DC",
         "city": "Washington, DC",
         "category": "City Landmark",
-        "icon": "🏙️",
+        "icon": "city",
         "desc": "Monumental wide cycleways connecting Capitol Hill and Potomac riverfront",
         "lat": 38.8893, "lon": -77.0502
     },
@@ -1621,7 +1637,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Mount Vernon Trail at Georgetown, Washington, DC",
         "city": "Washington, DC",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Paved scenic trail running south along the western bank of Potomac",
         "lat": 38.9036, "lon": -77.0673
     },
@@ -1629,7 +1645,7 @@ CYCLING_LOCATIONS: List[Dict[str, Any]] = [
         "name": "Lady Bird Lake Trail at Pfluger Bridge, Austin, TX",
         "city": "Austin, TX",
         "category": "Protected Greenway",
-        "icon": "🚲",
+        "icon": "bike",
         "desc": "Scenic Ann and Roy Butler Boardwalk and dedicated pedestrian/bike bridge",
         "lat": 30.2644, "lon": -97.7533
     }
@@ -4085,8 +4101,8 @@ THEME_AND_DOWNLOAD_JS = """
 
     var LOADER_VARIANTS = {
         greenway: {
-            badge: "🛡️ Greenway Sprint",
-            title: "🚲 Mapping Safe Cycling Corridors...",
+            badge: "Greenway Sprint",
+            title: "Mapping Safe Cycling Corridors...",
             tips: [
                 "Scanning protected bikeways & greenway trails...",
                 "Checking DelDOT speed limits & paved shoulders...",
@@ -4109,8 +4125,8 @@ THEME_AND_DOWNLOAD_JS = """
             )
         },
         radar: {
-            badge: "📡 Corridor Safety Radar",
-            title: "📡 Scanning Intersection Safety Nodes...",
+            badge: "Corridor Safety Radar",
+            title: "Scanning Intersection Safety Nodes...",
             tips: [
                 "Evaluating Vision Zero crash & crossing records...",
                 "Ranking quiet side streets over busy arterials...",
@@ -4133,8 +4149,8 @@ THEME_AND_DOWNLOAD_JS = """
             )
         },
         climb: {
-            badge: "⛰️ Grade & Terrain Profiler",
-            title: "⛰️ Profiling Hills & Surface Protection...",
+            badge: "Grade & Terrain Profiler",
+            title: "Profiling Hills & Surface Protection...",
             tips: [
                 "Computing elevation gain & hill-grade effort...",
                 "Separating greenways from high-speed arterials...",
@@ -4155,8 +4171,8 @@ THEME_AND_DOWNLOAD_JS = """
             )
         },
         night: {
-            badge: "🌙 Traffic & Visibility Guard",
-            title: "🌙 Checking Time-of-Day Traffic & Speeds...",
+            badge: "Traffic & Visibility Guard",
+            title: "Checking Time-of-Day Traffic & Speeds...",
             tips: [
                 "Adapting arterial traffic exposure by hour...",
                 "Checking posted speed limits along crossings...",
@@ -4180,8 +4196,8 @@ THEME_AND_DOWNLOAD_JS = """
             )
         },
         gpx: {
-            badge: "📥 GPX 1.1 Track Packager",
-            title: "📥 Packaging GPX Track Download...",
+            badge: "GPX 1.1 Track Packager",
+            title: "Packaging GPX Track Download...",
             tips: [
                 "Encoding GPS coordinates & safety segment notes...",
                 "Validating GPX 1.1 schema for bike computers...",
@@ -4280,23 +4296,23 @@ THEME_AND_DOWNLOAD_JS = """
         var minMs = 320;
         if (txt.indexOf("gpx") !== -1 || txt.indexOf("export") !== -1) {
             pool = ["gpx", "radar"];
-            msg = "📥 Packaging GPX Track Download...";
+            msg = "Packaging GPX Track Download...";
             minMs = 460;
         } else if (txt.indexOf("generate") !== -1 || txt.indexOf("compare") !== -1) {
             pool = isDark ? ["night", "radar", "greenway", "climb"] : ["radar", "greenway", "climb", "night"];
             minMs = 520;
         } else if (txt.indexOf("advanced") !== -1 || txt.indexOf("basic") !== -1) {
             pool = ["climb", "radar", "greenway"];
-            msg = "🔬 Updating Safety Telemetry Mode...";
+            msg = "Updating Safety Telemetry Mode...";
             minMs = 360;
         } else if (txt.indexOf("schedule") !== -1 || txt.indexOf("mph") !== -1 ||
                    txt.indexOf("am") !== -1 || txt.indexOf("pm") !== -1) {
             pool = ["night", "climb", "greenway"];
-            msg = "⏱️ Adapting Schedule & Traffic Window...";
+            msg = "Adapting Schedule & Traffic Window...";
             minMs = 380;
         } else if (txt.indexOf("inspect") !== -1 || txt.indexOf("details") !== -1) {
             pool = ["climb", "radar", "night"];
-            msg = "🛣️ Opening Corridor Safety Breakdown...";
+            msg = "Opening Corridor Safety Breakdown...";
             minMs = 340;
         }
         var idx = variantCycle % pool.length;
@@ -4516,6 +4532,11 @@ THEME_AND_DOWNLOAD_JS = """
 """
 add_website_header(
     '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+    '<link rel="preconnect" href="https://fonts.googleapis.com">'
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+    '<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700'
+    '&family=Outfit:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" '
+    'rel="stylesheet">'
     '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" '
     'crossorigin=""/>' + LEAFLET_SCRIPT
 )
@@ -4523,181 +4544,740 @@ add_website_js(THEME_AND_DOWNLOAD_JS)
 set_website_title("SafeCycle — Safety-First Bike GPS and Route Planner")
 
 
+def _build_css_icon_masks() -> str:
+    """Build CSS mask-image rules for custom button icons under 120 chars/line."""
+    hdr = (
+        "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' "
+        "fill='none' stroke='%23000' stroke-width='2' "
+        "stroke-linecap='round' stroke-linejoin='round'%3E"
+    )
+    icons = {
+        "bike": (
+            "%3Ccircle cx='5.5' cy='17.5' r='3.5'/%3E"
+            "%3Ccircle cx='18.5' cy='17.5' r='3.5'/%3E"
+            "%3Cpath d='M15 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm-3 "
+            "11.5V14l-3-3 4-3 2 3h2'/%3E"
+        ),
+        "map": (
+            "%3Cpolygon points='3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21'/%3E"
+            "%3Cline x1='9' y1='3' x2='9' y2='18'/%3E"
+            "%3Cline x1='15' y1='6' x2='15' y2='21'/%3E"
+        ),
+        "chart": (
+            "%3Cline x1='18' y1='20' x2='18' y2='10'/%3E"
+            "%3Cline x1='12' y1='20' x2='12' y2='4'/%3E"
+            "%3Cline x1='6' y1='20' x2='6' y2='14'/%3E"
+        ),
+        "compass": (
+            "%3Ccircle cx='12' cy='12' r='10'/%3E"
+            "%3Cpolygon points='16.24 7.76 14.12 14.12 "
+            "7.76 16.24 9.88 9.88 16.24 7.76'/%3E"
+        ),
+        "bookmark": (
+            "%3Cpath d='M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z'/%3E"
+        ),
+        "star": (
+            "%3Cpolygon points='12 2 15.09 8.26 22 9.27 17 14.14 "
+            "18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2'/%3E"
+        ),
+        "info": (
+            "%3Ccircle cx='12' cy='12' r='10'/%3E"
+            "%3Cline x1='12' y1='16' x2='12' y2='12'/%3E"
+            "%3Cline x1='12' y1='8' x2='12.01' y2='8'/%3E"
+        ),
+        "moon": (
+            "%3Cpath d='M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z'/%3E"
+        ),
+        "sun": (
+            "%3Ccircle cx='12' cy='12' r='5'/%3E"
+            "%3Cline x1='12' y1='1' x2='12' y2='3'/%3E"
+            "%3Cline x1='12' y1='21' x2='12' y2='23'/%3E"
+            "%3Cline x1='4.22' y1='4.22' x2='5.64' y2='5.64'/%3E"
+            "%3Cline x1='18.36' y1='18.36' x2='19.78' y2='19.78'/%3E"
+            "%3Cline x1='1' y1='12' x2='3' y2='12'/%3E"
+            "%3Cline x1='21' y1='12' x2='23' y2='12'/%3E"
+            "%3Cline x1='4.22' y1='19.78' x2='5.64' y2='18.36'/%3E"
+            "%3Cline x1='18.36' y1='5.64' x2='19.78' y2='4.22'/%3E"
+        ),
+        "download": (
+            "%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E"
+            "%3Cpolyline points='7 10 12 15 17 10'/%3E"
+            "%3Cline x1='12' y1='15' x2='12' y2='3'/%3E"
+        ),
+        "sliders": (
+            "%3Cline x1='4' y1='21' x2='4' y2='14'/%3E"
+            "%3Cline x1='4' y1='10' x2='4' y2='3'/%3E"
+            "%3Cline x1='12' y1='21' x2='12' y2='12'/%3E"
+            "%3Cline x1='12' y1='8' x2='12' y2='3'/%3E"
+            "%3Cline x1='20' y1='21' x2='20' y2='16'/%3E"
+            "%3Cline x1='20' y1='12' x2='20' y2='3'/%3E"
+            "%3Cline x1='1' y1='14' x2='7' y2='14'/%3E"
+            "%3Cline x1='9' y1='8' x2='15' y2='8'/%3E"
+            "%3Cline x1='17' y1='16' x2='23' y2='16'/%3E"
+        ),
+        "layers": (
+            "%3Cpolygon points='12 2 2 7 12 12 22 7 12 2'/%3E"
+            "%3Cpolyline points='2 17 12 22 22 17'/%3E"
+            "%3Cpolyline points='2 12 12 17 22 12'/%3E"
+        ),
+        "search": (
+            "%3Ccircle cx='11' cy='11' r='8'/%3E"
+            "%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E"
+        ),
+        "arrow-left": (
+            "%3Cline x1='19' y1='12' x2='5' y2='12'/%3E"
+            "%3Cpolyline points='12 19 5 12 12 5'/%3E"
+        ),
+        "arrow-right": (
+            "%3Cline x1='5' y1='12' x2='19' y2='12'/%3E"
+            "%3Cpolyline points='12 5 19 12 12 19'/%3E"
+        ),
+        "refresh": (
+            "%3Cpolyline points='23 4 23 10 17 10'/%3E"
+            "%3Cpath d='M20.49 15a9 9 0 1 1-2.12-9.36L23 10'/%3E"
+        ),
+        "stop": "%3Crect x='6' y='6' width='12' height='12' rx='2'/%3E",
+        "trash": (
+            "%3Cpolyline points='3 6 5 6 21 6'/%3E"
+            "%3Cpath d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 "
+            "0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/%3E"
+        ),
+        "alert": (
+            "%3Cpath d='M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 "
+            "0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'/%3E"
+            "%3Cline x1='12' y1='9' x2='12' y2='13'/%3E"
+            "%3Cline x1='12' y1='17' x2='12.01' y2='17'/%3E"
+        ),
+        "flask": (
+            "%3Cpath d='M9 3h6'/%3E"
+            "%3Cpath d='M10 3v5l-5.5 9.5A2 2 0 0 0 6.2 21h11.6a2 2 0 "
+            "0 0 1.7-3.5L14 8V3'/%3E"
+        ),
+        "pin": (
+            "%3Cpath d='M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z'/%3E"
+            "%3Ccircle cx='12' cy='10' r='3'/%3E"
+        ),
+    }
+    rules = []
+    for key, body in icons.items():
+        uri = f'url("data:image/svg+xml,{hdr}{body}%3C/svg%3E")'
+        rules.append(
+            f".sc-ico-{key}::before {{\n"
+            f"    -webkit-mask-image: {uri};\n"
+            f"    mask-image: {uri};\n}}"
+        )
+    return "\n".join(rules)
+
+
+add_website_css(_build_css_icon_masks())
 add_website_css("""
-/* SafeCycle Clean Theme */
-body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    color: #1f2937;
-    background-color: #f8fafc;
+/* SafeCycle Clean Design System */
+:root {
+    --sc-bg: #f8fafc;
+    --sc-surface: #ffffff;
+    --sc-surface-2: #f1f5f9;
+    --sc-border: #e2e8f0;
+    --sc-border-strong: #cbd5e1;
+    --sc-text: #0f172a;
+    --sc-text-muted: #475569;
+    --sc-text-subtle: #64748b;
+    --sc-emerald: #047857;
+    --sc-emerald-hover: #065f46;
+    --sc-emerald-soft: #ecfdf5;
+    --sc-emerald-border: #a7f3d0;
+    --sc-cobalt: #2563eb;
+    --sc-font-display: 'Outfit', 'Plus Jakarta Sans', -apple-system, sans-serif;
+    --sc-font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --sc-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+html, body {
+    font-family: var(--sc-font-sans);
+    color: var(--sc-text);
+    background-color: var(--sc-bg);
     margin: 0;
     padding: 0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
-.safecycle-container {
-    max-width: 1040px;
+
+.drafter-body-- {
+    max-width: 1260px;
     margin: 0 auto;
-    padding: 16px;
+    padding: 14px 20px 40px 20px;
+    background-color: transparent !important;
+    font-family: var(--sc-font-sans);
 }
-.safecycle-navbar {
+
+h1, h2, h3, h4, .safecycle-brand, .strava-deck-title {
+    font-family: var(--sc-font-display);
+    letter-spacing: -0.02em;
+}
+
+.sc-mono, .strava-stat-val, .stat-value {
+    font-variant-numeric: tabular-nums;
+}
+
+/* --- Unified 3-Zone Top Navigation --- */
+.sc-topbar {
     display: flex;
     flex-wrap: wrap;
-    justify-content: space-between;
     align-items: center;
-    background: #064e3b;
-    color: white;
-    padding: 12px 20px;
-    border-radius: 10px;
-    margin-bottom: 20px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    justify-content: space-between;
+    gap: 12px 18px;
+    background: #ffffff;
+    border: 1px solid var(--sc-border);
+    border-radius: 12px;
+    padding: 10px 16px;
+    margin-bottom: 18px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 .safecycle-brand {
-    font-size: 1.4rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+}
+.sc-brand-mark {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    background: #047857;
+    color: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.sc-brand-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+}
+.sc-brand-name {
+    font-family: var(--sc-font-display);
+    font-size: 1.18rem;
     font-weight: 700;
-    letter-spacing: -0.5px;
+    color: #0f172a;
+    letter-spacing: -0.025em;
+}
+.sc-brand-tag {
+    font-family: var(--sc-font-sans);
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: #64748b;
+    margin-top: 1px;
+}
+.sc-nav-center {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 auto;
+    justify-content: center;
+}
+.sc-nav-right {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-shrink: 0;
 }
-.safecycle-brand small {
-    font-size: 0.8rem;
-    font-weight: 400;
-    color: #a7f3d0;
-}
-.nav-buttons-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-.nav-btn {
-    background: #047857;
-    color: white !important;
-    border: 1px solid #10b981;
-    border-radius: 6px;
-    padding: 6px 12px;
-    font-size: 0.85rem;
+
+/* --- Custom Button & Vector Icon System --- */
+.drafter-body-- button.sc-btn,
+button.sc-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    font-family: var(--sc-font-sans);
     font-weight: 600;
+    font-size: 0.86rem;
+    line-height: 1.25;
+    border-radius: 8px;
+    padding: 9px 15px;
     cursor: pointer;
+    border: 1px solid transparent;
+    transition: background-color 0.15s ease, border-color 0.15s ease,
+                color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
     text-decoration: none;
+    white-space: nowrap;
+    margin: 0;
 }
-.nav-btn:hover {
-    background: #059669;
+button.sc-btn:active {
+    transform: translateY(1px);
 }
+button.sc-btn.sc-btn-sm {
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    border-radius: 7px;
+}
+button.sc-btn.sc-btn-xs {
+    padding: 5px 10px;
+    font-size: 0.76rem;
+    border-radius: 6px;
+}
+button.sc-btn.sc-btn-full {
+    width: 100%;
+    padding: 11px 18px;
+    font-size: 0.94rem;
+    font-weight: 700;
+}
+button.sc-btn.sc-btn-brand {
+    background: #047857;
+    color: #ffffff;
+    border-color: #047857;
+    box-shadow: 0 1px 2px rgba(4, 120, 87, 0.22);
+}
+button.sc-btn.sc-btn-brand:hover {
+    background: #065f46;
+    border-color: #065f46;
+}
+button.sc-btn.sc-btn-primary {
+    background: #0f172a;
+    color: #ffffff;
+    border-color: #0f172a;
+}
+button.sc-btn.sc-btn-primary:hover {
+    background: #1e293b;
+}
+button.sc-btn.sc-btn-secondary {
+    background: #ffffff;
+    color: #1e293b;
+    border-color: #cbd5e1;
+}
+button.sc-btn.sc-btn-secondary:hover {
+    background: #f8fafc;
+    border-color: #94a3b8;
+}
+button.sc-btn.sc-btn-ghost {
+    background: #f1f5f9;
+    color: #334155;
+    border-color: #e2e8f0;
+}
+button.sc-btn.sc-btn-ghost:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+}
+button.sc-btn.sc-btn-danger {
+    background: #fef2f2;
+    color: #b91c1c;
+    border-color: #fecaca;
+}
+button.sc-btn.sc-btn-danger:hover {
+    background: #fee2e2;
+}
+button.sc-btn.sc-btn-nav {
+    background: transparent;
+    color: #475569;
+    border-color: transparent;
+    padding: 7px 12px;
+    font-size: 0.84rem;
+}
+button.sc-btn.sc-btn-nav:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+button.sc-btn.sc-btn-nav-active {
+    background: #ecfdf5;
+    color: #065f46;
+    border-color: #a7f3d0;
+    padding: 7px 12px;
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+button.sc-btn.sc-btn-theme {
+    background: #f8fafc;
+    color: #334155;
+    border-color: #cbd5e1;
+    padding: 6px 12px;
+    font-size: 0.8rem;
+}
+button.sc-btn.sc-btn-theme:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+button.sc-btn.sc-btn-mode {
+    background: #ffffff;
+    color: #334155;
+    border-color: #cbd5e1;
+    padding: 5px 12px;
+    font-size: 0.78rem;
+}
+button.sc-btn.sc-btn-mode:hover {
+    background: #f8fafc;
+    border-color: #94a3b8;
+}
+button.sc-btn.sc-btn-mode-active {
+    background: #ecfdf5;
+    color: #065f46;
+    border-color: #10b981;
+    padding: 5px 12px;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+/* Monochrome Vector Mask Icons for Drafter Native Buttons */
+button.sc-btn[class*="sc-ico-"]::before {
+    content: "";
+    display: inline-block;
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    background-color: currentColor;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
+    -webkit-mask-size: contain;
+    mask-size: contain;
+}
+""")
+add_website_css("""
+
+/* --- Cards, Form Inputs & Two-Column Grids --- */
 .card {
-    background: white;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    padding: 18px;
+    background: #ffffff;
+    border: 1px solid var(--sc-border);
+    border-radius: 12px;
+    padding: 20px;
     margin-bottom: 18px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
+.drafter-body-- label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #334155;
+    margin-bottom: 5px;
+    letter-spacing: 0.01em;
+}
+.drafter-body-- input[type="text"],
+.drafter-body-- input[type="number"],
+.drafter-body-- input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),
+.drafter-body-- select,
+.drafter-body-- textarea {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-height: 38px;
+    font-family: var(--sc-font-sans);
+    font-size: 0.88rem;
+    color: #0f172a;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 8px 11px;
+    margin: 0;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.drafter-body-- input:focus,
+.drafter-body-- select:focus,
+.drafter-body-- textarea:focus {
+    outline: none;
+    border-color: #047857;
+    box-shadow: 0 0 0 3px rgba(4, 120, 87, 0.12);
+}
+
+.sc-planner-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+    align-items: stretch;
+    margin-bottom: 16px;
+}
+.sc-planner-grid > .card {
+    margin-bottom: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+.sc-planner-heading {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: #064e3b;
+    font-family: var(--sc-font-display);
+    font-size: 1.28rem !important;
+    font-weight: 700 !important;
+    line-height: 1.25 !important;
+    margin: 0 0 16px 0 !important;
+}
+.drafter-body-- .sc-form-row-3,
+.sc-form-row-3 {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 12px !important;
+    align-items: end !important;
+    margin-bottom: 14px !important;
+}
+.drafter-body-- .sc-form-row-2,
+.sc-form-row-2 {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) !important;
+    gap: 14px !important;
+    align-items: end !important;
+    margin-bottom: 18px !important;
+}
+.drafter-body-- .sc-time-row,
+.sc-time-row {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr) !important;
+    gap: 8px !important;
+    align-items: center !important;
+}
+.sc-form-row-3 > *,
+.sc-form-row-2 > *,
+.sc-time-row > * {
+    min-width: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+}
+.drafter-body-- .sc-form-row-3 label,
+.drafter-body-- .sc-form-row-2 label {
+    white-space: nowrap;
+}
+.sc-results-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(350px, 0.95fr);
+    gap: 18px;
+    align-items: start;
+    margin-bottom: 18px;
+}
+.sc-results-map-card {
+    background: #ffffff;
+    border: 1px solid var(--sc-border);
+    border-radius: 12px;
+    padding: 12px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    min-width: 0;
+}
+.sc-overview-panel {
+    background: #ffffff;
+    border: 1px solid var(--sc-border);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+.sc-switch-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 9px;
+    flex-wrap: wrap;
+}
+.drafter-body-- button.sc-switch-tab,
+button.sc-switch-tab {
+    flex: 1 1 0;
+    min-width: 72px;
+    width: auto;
+    height: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 7px 10px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: #475569;
+    font-family: var(--sc-font-sans);
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.2;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    box-shadow: none;
+    transition: all 0.14s ease;
+    white-space: nowrap;
+}
+.drafter-body-- button.sc-switch-tab:hover,
+button.sc-switch-tab:hover {
+    color: #0f172a;
+    background: rgba(255, 255, 255, 0.75);
+}
+.drafter-body-- button.sc-switch-tab.is-active,
+button.sc-switch-tab.is-active {
+    background: #047857;
+    color: #ffffff;
+    font-weight: 700;
+    border-color: #047857;
+    box-shadow: 0 1px 3px rgba(4, 120, 87, 0.25);
+}
+.sc-overview-slot {
+    flex-direction: column;
+    gap: 12px;
+    flex: 1;
+}
+@media (max-width: 920px) {
+    .sc-planner-grid,
+    .sc-results-split {
+        grid-template-columns: 1fr;
+    }
+    .sc-topbar {
+        justify-content: center;
+    }
+}
+@media (max-width: 680px) {
+    .drafter-body-- .sc-form-row-3,
+    .sc-form-row-3,
+    .drafter-body-- .sc-form-row-2,
+    .sc-form-row-2 {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+/* --- Badges & Notifications --- */
 .badge-lower-risk {
     background: #dcfce7; color: #15803d; border: 1px solid #86efac;
-    padding: 3px 8px; border-radius: 9999px; font-weight: 600; font-size: 0.8rem;
+    padding: 3px 9px; border-radius: 6px; font-weight: 600; font-size: 0.78rem;
 }
 .badge-moderate {
     background: #fef9c3; color: #854d0e; border: 1px solid #fde047;
-    padding: 3px 8px; border-radius: 9999px; font-weight: 600; font-size: 0.8rem;
+    padding: 3px 9px; border-radius: 6px; font-weight: 600; font-size: 0.78rem;
 }
 .badge-elevated {
     background: #ffedd5; color: #9a3412; border: 1px solid #fdba74;
-    padding: 3px 8px; border-radius: 9999px; font-weight: 600; font-size: 0.8rem;
+    padding: 3px 9px; border-radius: 6px; font-weight: 600; font-size: 0.78rem;
 }
 .badge-high-risk {
     background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5;
-    padding: 3px 8px; border-radius: 9999px; font-weight: 600; font-size: 0.8rem;
+    padding: 3px 9px; border-radius: 6px; font-weight: 600; font-size: 0.78rem;
 }
 .badge-unknown {
     background: #f3f4f6; color: #4b5563; border: 1px solid #d1d5db;
-    padding: 3px 8px; border-radius: 9999px; font-weight: 600; font-size: 0.8rem;
+    padding: 3px 9px; border-radius: 6px; font-weight: 600; font-size: 0.78rem;
 }
 .badge-confidence-high {
     background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc;
-    padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;
+    padding: 2px 7px; border-radius: 5px; font-size: 0.74rem; font-weight: 600;
 }
 .badge-confidence-medium {
     background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;
-    padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;
+    padding: 2px 7px; border-radius: 5px; font-size: 0.74rem; font-weight: 600;
 }
 .badge-confidence-low {
     background: #fff1f2; color: #be123c; border: 1px solid #fecdd3;
-    padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;
+    padding: 2px 7px; border-radius: 5px; font-size: 0.74rem; font-weight: 600;
 }
 .notification-banner {
     background: #ecfdf5;
-    border-left: 4px solid #10b981;
+    border: 1px solid #a7f3d0;
+    border-left: 4px solid #047857;
     color: #065f46;
     padding: 10px 14px;
-    border-radius: 6px;
+    border-radius: 8px;
     margin-bottom: 16px;
+    font-size: 0.88rem;
     font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex-wrap: wrap;
 }
 .warning-box {
     background: #fff7ed;
-    border-left: 4px solid #f97316;
+    border: 1px solid #fed7aa;
+    border-left: 4px solid #ea580c;
     color: #9a3412;
     padding: 10px 14px;
-    border-radius: 6px;
-    margin-bottom: 14px;
+    border-radius: 8px;
+    margin-bottom: 12px;
+    font-size: 0.84rem;
 }
 .legend-bar {
     display: flex;
     flex-wrap: wrap;
-    gap: 12px;
-    padding: 10px;
-    background: #f1f5f9;
-    border-radius: 8px;
-    font-size: 0.85rem;
+    gap: 14px;
+    padding: 10px 14px;
+    background: #ffffff;
+    border: 1px solid var(--sc-border);
+    border-radius: 10px;
+    font-size: 0.82rem;
+    color: #475569;
     align-items: center;
+    margin-bottom: 12px;
 }
 .legend-dot {
     display: inline-block;
-    width: 12px;
-    height: 12px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     margin-right: 5px;
 }
 .nav-turn-card {
     background: #0f172a;
-    color: white;
+    color: #ffffff;
     border-radius: 12px;
     padding: 24px;
-    margin-bottom: 20px;
+    margin-bottom: 18px;
 }
 .stat-pill {
     background: #f8fafc;
     border: 1px solid #e2e8f0;
-    padding: 8px 12px;
+    padding: 10px 12px;
     border-radius: 8px;
     text-align: center;
 }
 .stat-value {
-    font-size: 1.3rem;
+    font-family: var(--sc-font-display);
+    font-size: 1.28rem;
     font-weight: 700;
     color: #064e3b;
 }
 .stat-label {
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     color: #64748b;
     text-transform: uppercase;
     font-weight: 600;
+    letter-spacing: 0.04em;
 }
 
-/* --- Strava Routes Design System --- */
+/* --- Route Overview & Comparison Design System --- */
 .strava-deck-header {
-    display: flex;
+    display: block;
+    margin-bottom: 14px;
+    padding: 12px 16px;
+    background: #ffffff;
+    border: 1px solid var(--sc-border);
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+    overflow: hidden;
+}
+.sc-deck-head-row {
+    display: flex !important;
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
-    gap: 12px;
-    margin-bottom: 14px;
-    padding-bottom: 10px;
-    border-bottom: 2px solid #f1f5f9;
+    gap: 10px 14px;
+    width: 100%;
+}
+.sc-deck-title-row {
+    display: flex !important;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px !important;
+    min-width: 0;
 }
 .strava-deck-title {
-    font-size: 1.25rem;
-    font-weight: 800;
+    font-family: var(--sc-font-display);
+    font-size: 1.18rem;
+    font-weight: 700;
     color: #0f172a;
-    letter-spacing: -0.5px;
-    display: flex;
+    letter-spacing: -0.02em;
+    display: inline-flex;
     align-items: center;
     gap: 8px;
 }
@@ -4709,104 +5289,101 @@ body {
 }
 .strava-card {
     background: #ffffff;
-    border: 2px solid #e2e8f0;
-    border-radius: 14px;
-    padding: 16px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 14px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
     position: relative;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
 }
-.strava-card:hover {
-    box-shadow: 0 8px 20px -3px rgba(0, 0, 0, 0.09);
-    transform: translateY(-2px);
-}
 .strava-card.active {
     border-color: #047857;
-    box-shadow: 0 10px 25px -4px rgba(4, 120, 87, 0.22), 0 4px 6px -2px rgba(4, 120, 87, 0.1);
-    background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 120px);
+    background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 95px);
 }
 .strava-card-top {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 8px;
     margin-bottom: 8px;
 }
 .strava-tag-badge {
-    font-size: 0.8rem;
-    font-weight: 800;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-.strava-pill-active {
-    background: #047857;
-    color: white;
-    font-size: 0.75rem;
+    font-family: var(--sc-font-display);
+    font-size: 0.96rem;
     font-weight: 700;
-    padding: 5px 12px;
-    border-radius: 9999px;
-    letter-spacing: 0.5px;
-    white-space: nowrap;
+    letter-spacing: -0.01em;
     display: inline-flex;
     align-items: center;
-    flex-shrink: 0;
-    box-sizing: border-box;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    gap: 7px;
+}
+.strava-pill-active {
+    background: #ecfdf5;
+    color: #065f46;
+    border: 1px solid #a7f3d0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 6px;
+    letter-spacing: 0.02em;
+    white-space: normal;
+    max-width: 100%;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
 }
 .strava-pill-alt {
     background: #f1f5f9;
-    color: #64748b;
+    color: #475569;
+    border: 1px solid #e2e8f0;
     font-size: 0.72rem;
-    font-weight: 700;
+    font-weight: 600;
     padding: 3px 9px;
-    border-radius: 9999px;
+    border-radius: 6px;
 }
 .strava-stats-matrix {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 6px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
     text-align: center;
     background: #f8fafc;
-    border: 1px solid #edf2f7;
-    border-radius: 10px;
-    padding: 10px 4px;
+    border: 1px solid #e2e8f0;
+    border-radius: 9px;
+    padding: 11px 6px;
     margin: 10px 0;
 }
 .strava-stat-val {
-    font-size: clamp(0.95rem, 1.3vw, 1.22rem);
-    font-weight: 800;
+    font-family: var(--sc-font-display);
+    font-size: clamp(1rem, 1.25vw, 1.24rem);
+    font-weight: 700;
     color: #0f172a;
     line-height: 1.15;
     white-space: nowrap;
 }
 .strava-stat-unit {
-    font-size: 0.74rem;
+    font-size: 0.76rem;
     font-weight: 600;
     color: #64748b;
 }
 .strava-stat-sub {
-    font-size: 0.68rem;
+    font-size: 0.7rem;
     color: #64748b;
     margin-top: 2px;
 }
 .strava-stat-lbl {
-    font-size: 0.65rem;
-    font-weight: 800;
-    color: #94a3b8;
+    font-size: 0.66rem;
+    font-weight: 700;
+    color: #64748b;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.05em;
     margin-top: 4px;
 }
 .strava-score-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 12px;
+    padding: 9px 12px;
     border-radius: 8px;
     margin: 8px 0;
     font-size: 0.85rem;
@@ -4814,7 +5391,7 @@ body {
 }
 .strava-spectrum-bar {
     display: flex;
-    height: 9px;
+    height: 8px;
     border-radius: 9999px;
     overflow: hidden;
     margin: 8px 0 4px 0;
@@ -4831,23 +5408,67 @@ body {
 }
 .strava-sparkline-wrap {
     margin: 8px 0;
-    background: #fbfcfd;
+    background: #f8fafc;
     border-radius: 8px;
-    padding: 6px;
-    border: 1px solid #f1f5f9;
+    padding: 8px;
+    border: 1px solid #e2e8f0;
 }
 .strava-features-list {
-    margin: 8px 0 12px 0;
+    margin: 8px 0 6px 0;
     padding: 0;
     list-style: none;
-    font-size: 0.8rem;
+    font-size: 0.81rem;
     color: #334155;
 }
 .strava-features-list li {
-    margin-bottom: 4px;
+    margin-bottom: 5px;
     display: flex;
     align-items: flex-start;
-    gap: 6px;
+    gap: 7px;
+    line-height: 1.35;
+}
+.strava-card.is-basic {
+    padding: 14px;
+    border-radius: 10px;
+}
+.safecycle-basic-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 9px;
+    padding: 11px 6px;
+    margin: 8px 0;
+    text-align: center;
+}
+.safecycle-basic-note {
+    font-size: 0.81rem;
+    color: #475569;
+    margin: 4px 0 0 0;
+    line-height: 1.4;
+}
+.sc-inline-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    font-size: 0.8rem;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    color: #334155;
+    line-height: 1.35;
+}
+.sc-inline-alert.is-warn {
+    background: #fff7ed;
+    border-color: #fed7aa;
+    color: #9a3412;
+}
+.sc-inline-alert.is-ok {
+    background: #ecfdf5;
+    border-color: #a7f3d0;
+    color: #065f46;
 }
 
 /* --- Autocomplete & Dropdowns --- */
@@ -4863,7 +5484,7 @@ body {
     background: #ffffff;
     border: 1.5px solid #047857;
     border-radius: 10px;
-    box-shadow: 0 14px 30px -4px rgba(0, 0, 0, 0.18);
+    box-shadow: 0 14px 30px -4px rgba(15, 23, 42, 0.16);
     max-height: 290px;
     overflow-y: auto;
     z-index: 99999;
@@ -4881,7 +5502,7 @@ body {
 }
 .safecycle-dropdown-item:hover, .safecycle-dropdown-item.is-selected {
     background: #f0fdf4;
-    border-left: 4px solid #047857;
+    border-left: 3px solid #047857;
 }
 .safecycle-dropdown-item:last-child {
     border-bottom: none;
@@ -4890,7 +5511,7 @@ body {
     font-size: 0.68rem;
     font-weight: 700;
     padding: 2px 7px;
-    border-radius: 9999px;
+    border-radius: 5px;
     background: #e0f2fe;
     color: #0369a1;
     white-space: nowrap;
@@ -4900,7 +5521,7 @@ body {
     margin-top: 6px;
     padding: 7px 10px;
     font-size: 0.82rem;
-    border-radius: 6px;
+    border-radius: 7px;
     border: 1px solid #cbd5e1;
     background: #ffffff;
     color: #334155;
@@ -4953,13 +5574,13 @@ body {
 }
 .safecycle-loader-card {
     background: #ffffff;
-    border: 2px solid #10b981;
+    border: 1.5px solid #10b981;
     border-radius: 16px;
     padding: 22px 26px 18px 26px;
     width: 100%;
     max-width: 400px;
     text-align: center;
-    box-shadow: 0 22px 50px rgba(6, 78, 59, 0.28);
+    box-shadow: 0 22px 50px rgba(6, 78, 59, 0.25);
 }
 .safecycle-loader-badge {
     display: inline-flex;
@@ -4968,11 +5589,11 @@ body {
     background: #ecfdf5;
     color: #065f46;
     border: 1px solid #a7f3d0;
-    border-radius: 9999px;
-    padding: 4px 12px;
-    font-size: 0.74rem;
-    font-weight: 800;
-    letter-spacing: 0.4px;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
     margin-bottom: 10px;
 }
@@ -5019,8 +5640,9 @@ body {
     50% { transform: scale(1.16); }
 }
 .safecycle-loader-title {
+    font-family: var(--sc-font-display);
     font-size: 1.05rem;
-    font-weight: 800;
+    font-weight: 700;
     color: #064e3b;
     margin-bottom: 4px;
 }
@@ -5032,7 +5654,7 @@ body {
 }
 .safecycle-progress-track {
     width: 100%;
-    height: 7px;
+    height: 6px;
     border-radius: 9999px;
     background: #e2e8f0;
     overflow: hidden;
@@ -5042,7 +5664,7 @@ body {
     width: 44%;
     height: 100%;
     border-radius: 9999px;
-    background: linear-gradient(90deg, #059669, #10b981, #FC5200);
+    background: linear-gradient(90deg, #047857, #10b981, #2563eb);
     animation: safecycle-slide 1.15s ease-in-out infinite;
 }
 @keyframes safecycle-slide {
@@ -5056,7 +5678,7 @@ body {
     font-size: 0.74rem;
     font-weight: 600;
     padding: 4px 12px;
-    border-radius: 9999px;
+    border-radius: 6px;
     cursor: pointer;
 }
 .safecycle-loader-close:hover {
@@ -5117,12 +5739,12 @@ body {
     stroke: #e2e8f0;
 }
 .safecycle-loader-card[data-variant="radar"] {
-    border-color: #0284c7;
+    border-color: #2563eb;
 }
 .safecycle-loader-card[data-variant="radar"] .safecycle-loader-badge {
-    background: #e0f2fe;
-    color: #075985;
-    border-color: #7dd3fc;
+    background: #eff6ff;
+    color: #1d4ed8;
+    border-color: #bfdbfe;
 }
 .safecycle-loader-card[data-variant="climb"] {
     border-color: #059669;
@@ -5151,19 +5773,19 @@ body {
     color: #cbd5e1;
 }
 .safecycle-loader-card[data-variant="gpx"] {
-    border-color: #FC5200;
+    border-color: #0284c7;
 }
 .safecycle-loader-card[data-variant="gpx"] .safecycle-loader-badge {
-    background: #fff7ed;
-    color: #9a3412;
-    border-color: #fdba74;
+    background: #e0f2fe;
+    color: #0369a1;
+    border-color: #7dd3fc;
 }
 .safecycle-loader-card[data-variant="gpx"] .safecycle-progress-fill {
-    background: linear-gradient(90deg, #0284c7, #10b981, #FC5200);
+    background: linear-gradient(90deg, #0284c7, #10b981, #2563eb);
 }
 .safecycle-mode-switcher {
     background: #ffffff;
-    border: 1.5px solid #cbd5e1;
+    border: 1px solid #cbd5e1;
     border-radius: 10px;
     padding: 10px 16px;
     margin: 0 0 14px 0;
@@ -5172,52 +5794,10 @@ body {
     align-items: center;
     flex-wrap: wrap;
     gap: 10px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 .safecycle-mode-switcher.is-advanced {
     background: #f0fdf4;
     border-color: #34d399;
-}
-body.safecycle-dark .safecycle-loader-card {
-    background: #0f172a !important;
-    border-color: #10b981 !important;
-    color: #f8fafc !important;
-}
-body.safecycle-dark .safecycle-loader-card[data-variant="radar"] {
-    border-color: #38bdf8 !important;
-}
-body.safecycle-dark .safecycle-loader-card[data-variant="gpx"] {
-    border-color: #fb923c !important;
-}
-body.safecycle-dark .safecycle-frame-stroke {
-    stroke: #e2e8f0;
-}
-body.safecycle-dark .safecycle-loader-badge {
-    background: #064e3b;
-    color: #a7f3d0;
-    border-color: #059669;
-}
-body.safecycle-dark .safecycle-loader-title {
-    color: #6ee7b7 !important;
-}
-body.safecycle-dark .safecycle-loader-sub {
-    color: #cbd5e1 !important;
-}
-body.safecycle-dark .safecycle-progress-track {
-    background: #1e293b;
-}
-body.safecycle-dark .safecycle-loader-close {
-    border-color: #475569;
-    color: #cbd5e1;
-}
-body.safecycle-dark .safecycle-mode-switcher {
-    background: #111827 !important;
-    border-color: #334155 !important;
-    color: #e2e8f0 !important;
-}
-body.safecycle-dark .safecycle-mode-switcher.is-advanced {
-    background: rgba(6, 78, 59, 0.35) !important;
-    border-color: #10b981 !important;
 }
 
 /* --- Shared Leaflet Layout & Map Layer Toggle --- */
@@ -5249,36 +5829,48 @@ body.safecycle-dark .safecycle-mode-switcher.is-advanced {
     backdrop-filter: blur(8px);
     padding: 3px;
     border-radius: 8px;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.14);
     border: 1px solid #cbd5e1;
     display: inline-flex;
     align-items: center;
     gap: 3px;
     user-select: none;
 }
-.safecycle-layer-btn {
-    padding: 5px 11px;
+.drafter-body-- button.safecycle-layer-btn,
+button.safecycle-layer-btn {
+    padding: 5px 10px;
+    margin: 0;
+    width: auto;
+    height: auto;
+    min-height: 0;
+    font-family: var(--sc-font-sans);
     font-size: 0.75rem;
-    font-weight: 700;
+    font-weight: 600;
     border-radius: 6px;
-    border: none;
+    border: 1px solid transparent;
     cursor: pointer;
     transition: all 0.15s ease;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    line-height: 1;
+    gap: 5px;
+    line-height: 1.2;
+    box-shadow: none;
+    white-space: nowrap;
 }
-.safecycle-layer-btn.is-active {
+.drafter-body-- button.safecycle-layer-btn.is-active,
+button.safecycle-layer-btn.is-active {
     background: #047857;
     color: #ffffff;
-    box-shadow: 0 1px 4px rgba(4, 120, 87, 0.35);
+    border-color: #047857;
 }
-.safecycle-layer-btn.is-inactive {
+.drafter-body-- button.safecycle-layer-btn.is-inactive,
+button.safecycle-layer-btn.is-inactive {
     background: transparent;
     color: #475569;
+    border-color: transparent;
 }
-.safecycle-layer-btn.is-inactive:hover {
+.drafter-body-- button.safecycle-layer-btn.is-inactive:hover,
+button.safecycle-layer-btn.is-inactive:hover {
     background: #f1f5f9;
     color: #0f172a;
 }
@@ -5287,12 +5879,102 @@ body.safecycle-dark .safecycle-mode-switcher.is-advanced {
 html.safecycle-dark,
 html.safecycle-dark body,
 body.safecycle-dark,
-body.safecycle-dark #drafter-root--,
-body.safecycle-dark .drafter-body--,
-.drafter-body--.safecycle-dark {
+body.safecycle-dark #drafter-root-- {
     background-color: #0b1120 !important;
     color: #e2e8f0 !important;
     min-height: 100vh;
+}
+body.safecycle-dark .sc-topbar,
+body.safecycle-dark .card,
+body.safecycle-dark .strava-deck-header,
+body.safecycle-dark .sc-results-map-card,
+body.safecycle-dark .sc-overview-panel {
+    background: #111827 !important;
+    border-color: #273244 !important;
+    color: #e2e8f0 !important;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+body.safecycle-dark .sc-brand-name,
+body.safecycle-dark .strava-deck-title,
+body.safecycle-dark .card h1,
+body.safecycle-dark .card h2,
+body.safecycle-dark .card h3,
+body.safecycle-dark .card h4 {
+    color: #f8fafc !important;
+}
+body.safecycle-dark .sc-brand-tag {
+    color: #94a3b8 !important;
+}
+body.safecycle-dark button.sc-btn.sc-btn-nav {
+    color: #cbd5e1;
+}
+body.safecycle-dark button.sc-btn.sc-btn-nav:hover {
+    background: #1e293b;
+    color: #ffffff;
+}
+body.safecycle-dark button.sc-btn.sc-btn-nav-active {
+    background: rgba(16, 185, 129, 0.16);
+    color: #6ee7b7;
+    border-color: #059669;
+}
+body.safecycle-dark button.sc-btn.sc-btn-secondary,
+body.safecycle-dark button.sc-btn.sc-btn-theme,
+body.safecycle-dark button.sc-btn.sc-btn-mode {
+    background: #1e293b;
+    color: #e2e8f0;
+    border-color: #334155;
+}
+body.safecycle-dark button.sc-btn.sc-btn-secondary:hover,
+body.safecycle-dark button.sc-btn.sc-btn-theme:hover,
+body.safecycle-dark button.sc-btn.sc-btn-mode:hover {
+    background: #273449;
+    border-color: #475569;
+}
+body.safecycle-dark button.sc-btn.sc-btn-mode-active {
+    background: rgba(16, 185, 129, 0.18);
+    color: #6ee7b7;
+    border-color: #10b981;
+}
+body.safecycle-dark button.sc-btn.sc-btn-ghost {
+    background: #1e293b;
+    color: #cbd5e1;
+    border-color: #334155;
+}
+body.safecycle-dark button.sc-btn.sc-btn-primary {
+    background: #10b981;
+    color: #042f2e;
+    border-color: #10b981;
+}
+body.safecycle-dark .sc-switch-tabs {
+    background: #0f172a;
+    border-color: #334155;
+}
+body.safecycle-dark button.sc-switch-tab {
+    background: transparent;
+    color: #94a3b8;
+    border-color: transparent;
+}
+body.safecycle-dark button.sc-switch-tab:hover {
+    color: #f8fafc;
+    background: rgba(30, 41, 59, 0.7);
+}
+body.safecycle-dark button.sc-switch-tab.is-active {
+    background: #10b981;
+    color: #042f2e;
+    border-color: #10b981;
+}
+body.safecycle-dark button.safecycle-layer-btn.is-active {
+    background: #10b981;
+    color: #042f2e;
+    border-color: #10b981;
+}
+body.safecycle-dark button.safecycle-layer-btn.is-inactive {
+    background: transparent;
+    color: #cbd5e1;
+}
+body.safecycle-dark button.safecycle-layer-btn.is-inactive:hover {
+    background: #1e293b;
+    color: #f8fafc;
 }
 body.safecycle-dark .drafter-body-- tbody tr:nth-child(2n) {
     background-color: #1e293b !important;
@@ -5300,23 +5982,6 @@ body.safecycle-dark .drafter-body-- tbody tr:nth-child(2n) {
 body.safecycle-dark .drafter-body-- th {
     background-color: #064e3b !important;
     color: #ecfdf5 !important;
-}
-body.safecycle-dark .safecycle-navbar {
-    background: #022c22;
-    border: 1px solid #065f46;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-}
-body.safecycle-dark .card {
-    background: #111827 !important;
-    border-color: #334155 !important;
-    color: #e2e8f0 !important;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
-}
-body.safecycle-dark .card h1,
-body.safecycle-dark .card h2,
-body.safecycle-dark .card h3,
-body.safecycle-dark .card h4 {
-    color: #6ee7b7 !important;
 }
 body.safecycle-dark input,
 body.safecycle-dark select,
@@ -5330,25 +5995,42 @@ body.safecycle-dark input:focus,
 body.safecycle-dark select:focus,
 body.safecycle-dark textarea:focus {
     border-color: #10b981 !important;
-    outline: none;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.16) !important;
 }
 body.safecycle-dark label {
     color: #cbd5e1 !important;
 }
 body.safecycle-dark .notification-banner {
     background: #064e3b;
+    border-color: #059669;
     border-left-color: #34d399;
     color: #ecfdf5;
 }
 body.safecycle-dark .warning-box {
     background: #431407;
+    border-color: #9a3412;
     border-left-color: #fb923c;
     color: #fed7aa;
 }
+body.safecycle-dark .sc-inline-alert {
+    background: #0f172a;
+    border-color: #334155;
+    color: #cbd5e1;
+}
+body.safecycle-dark .sc-inline-alert.is-warn {
+    background: rgba(154, 52, 18, 0.28);
+    border-color: #ea580c;
+    color: #fed7aa;
+}
+body.safecycle-dark .sc-inline-alert.is-ok {
+    background: rgba(6, 78, 59, 0.32);
+    border-color: #059669;
+    color: #a7f3d0;
+}
 body.safecycle-dark .legend-bar,
 body.safecycle-dark .stat-pill {
-    background: #1e293b !important;
-    border-color: #334155 !important;
+    background: #111827 !important;
+    border-color: #273244 !important;
     color: #cbd5e1 !important;
 }
 body.safecycle-dark .stat-value {
@@ -5357,19 +6039,13 @@ body.safecycle-dark .stat-value {
 body.safecycle-dark .stat-label {
     color: #94a3b8;
 }
-body.safecycle-dark .strava-deck-header {
-    border-bottom-color: #334155;
-}
-body.safecycle-dark .strava-deck-title {
-    color: #f8fafc !important;
-}
 body.safecycle-dark .strava-card {
     background: #111827 !important;
-    border-color: #334155 !important;
+    border-color: #273244 !important;
     color: #e2e8f0 !important;
 }
 body.safecycle-dark .strava-card.active {
-    background: linear-gradient(180deg, #064e3b 0%, #111827 120px) !important;
+    background: linear-gradient(180deg, rgba(6, 78, 59, 0.45) 0%, #111827 110px) !important;
     border-color: #10b981 !important;
 }
 body.safecycle-dark .strava-tag-badge,
@@ -5384,15 +6060,28 @@ body.safecycle-dark .strava-features-list {
     color: #cbd5e1 !important;
 }
 body.safecycle-dark .strava-stats-matrix,
+body.safecycle-dark .safecycle-basic-metrics,
 body.safecycle-dark .strava-sparkline-wrap {
     background: #0f172a !important;
-    border-color: #334155 !important;
+    border-color: #273244 !important;
+}
+body.safecycle-dark .safecycle-basic-note {
+    color: #cbd5e1 !important;
+}
+body.safecycle-dark .safecycle-basic-score {
+    color: #34d399 !important;
 }
 body.safecycle-dark .strava-spectrum-bar {
     background: #334155;
 }
+body.safecycle-dark .strava-pill-active {
+    background: rgba(16, 185, 129, 0.2) !important;
+    border-color: #059669 !important;
+    color: #6ee7b7 !important;
+}
 body.safecycle-dark .strava-pill-alt {
     background: #1e293b !important;
+    border-color: #334155 !important;
     color: #cbd5e1 !important;
 }
 body.safecycle-dark .safecycle-autocomplete-dropdown {
@@ -5459,36 +6148,46 @@ body.safecycle-dark #safecycle_planner_map_wrapper:not(.is-satellite) .leaflet-t
 body.safecycle-dark #safecycle_leaflet_route_wrapper:not(.is-satellite) .leaflet-tile-pane {
     filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(92%);
 }
-.strava-card.is-basic {
-    padding: 12px 14px;
-    border-radius: 12px;
-}
-.safecycle-basic-metrics {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 6px;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    padding: 8px 6px;
-    margin: 8px 0;
-    text-align: center;
-}
-.safecycle-basic-note {
-    font-size: 0.78rem;
-    color: #475569;
-    margin: 0 0 10px 0;
-    line-height: 1.35;
-}
-body.safecycle-dark .safecycle-basic-metrics {
+body.safecycle-dark .safecycle-loader-card {
     background: #0f172a !important;
-    border-color: #334155 !important;
+    border-color: #10b981 !important;
+    color: #f8fafc !important;
 }
-body.safecycle-dark .safecycle-basic-note {
+body.safecycle-dark .safecycle-loader-card[data-variant="radar"] {
+    border-color: #38bdf8 !important;
+}
+body.safecycle-dark .safecycle-loader-card[data-variant="gpx"] {
+    border-color: #38bdf8 !important;
+}
+body.safecycle-dark .safecycle-frame-stroke {
+    stroke: #e2e8f0;
+}
+body.safecycle-dark .safecycle-loader-badge {
+    background: #064e3b;
+    color: #a7f3d0;
+    border-color: #059669;
+}
+body.safecycle-dark .safecycle-loader-title {
+    color: #6ee7b7 !important;
+}
+body.safecycle-dark .safecycle-loader-sub {
     color: #cbd5e1 !important;
 }
-body.safecycle-dark .safecycle-basic-score {
-    color: #34d399 !important;
+body.safecycle-dark .safecycle-progress-track {
+    background: #1e293b;
+}
+body.safecycle-dark .safecycle-loader-close {
+    border-color: #475569;
+    color: #cbd5e1;
+}
+body.safecycle-dark .safecycle-mode-switcher {
+    background: #111827 !important;
+    border-color: #334155 !important;
+    color: #e2e8f0 !important;
+}
+body.safecycle-dark .safecycle-mode-switcher.is-advanced {
+    background: rgba(6, 78, 59, 0.35) !important;
+    border-color: #10b981 !important;
 }
 body.safecycle-dark [style*="background: #ffffff"],
 body.safecycle-dark [style*="background: #f8fafc"],
@@ -5595,9 +6294,121 @@ set_site_information(
     links="https://github.com/dKleintop/Safe-Cycle-Drafter"
 )
 
+def sc_icon(name: str, size: int = 16, cls: str = "") -> str:
+    """Return a crisp monochrome inline SVG icon scaled to `size` pixels."""
+    icons = {
+        "bike": (
+            '<circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/>'
+            '<path d="M15 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm-3 11.5V14l-3-3 4-3 2 3h2"/>'
+        ),
+        "map": (
+            '<polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>'
+            '<line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/>'
+        ),
+        "globe": (
+            '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>'
+            '<path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 '
+            '15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'
+        ),
+        "shield": '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+        "shield_check": (
+            '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'
+            '<polyline points="9 12 11 14 15 10"/>'
+        ),
+        "scale": (
+            '<path d="M16 16l3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1z"/>'
+            '<path d="M2 16l3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1z"/>'
+            '<path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/>'
+        ),
+        "zap": '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+        "compass": (
+            '<circle cx="12" cy="12" r="10"/>'
+            '<polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>'
+        ),
+        "bookmark": '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+        "star": (
+            '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 '
+            '12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>'
+        ),
+        "info": (
+            '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/>'
+            '<line x1="12" y1="8" x2="12.01" y2="8"/>'
+        ),
+        "sun": (
+            '<circle cx="12" cy="12" r="5"/>'
+            '<line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>'
+            '<line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>'
+            '<line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>'
+            '<line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>'
+            '<line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>'
+            '<line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'
+        ),
+        "moon": '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+        "download": (
+            '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'
+            '<polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>'
+        ),
+        "search": '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+        "clock": '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+        "mountain": '<path d="M8 3l4 8 5-5 5 15H2L8 3z"/>',
+        "pin": (
+            '<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>'
+            '<circle cx="12" cy="10" r="3"/>'
+        ),
+        "flag": (
+            '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>'
+            '<line x1="4" y1="22" x2="4" y2="15"/>'
+        ),
+        "arrow_left": '<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>',
+        "arrow_right": '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>',
+        "arrow_up": '<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>',
+        "turn_left": '<polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>',
+        "turn_right": '<polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/>',
+        "check": '<polyline points="20 6 9 17 4 12"/>',
+        "alert": (
+            '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3'
+            'L13.71 3.86a2 2 0 0 0-3.42 0z"/>'
+            '<line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>'
+        ),
+        "sliders": (
+            '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>'
+            '<line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>'
+            '<line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>'
+            '<line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/>'
+            '<line x1="17" y1="16" x2="23" y2="16"/>'
+        ),
+        "layers": (
+            '<polygon points="12 2 2 7 12 12 22 7 12 2"/>'
+            '<polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>'
+        ),
+        "activity": '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
+        "bar_chart": (
+            '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/>'
+            '<line x1="6" y1="20" x2="6" y2="14"/>'
+        ),
+        "stop": '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+        "target": '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+        "flask": '<path d="M9 3h6"/><path d="M10 3v5l-5.5 9.5A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-3.5L14 8V3"/>',
+        "road": (
+            '<path d="M4 19L8 5"/><path d="M16 5l4 14"/>'
+            '<line x1="12" y1="6" x2="12" y2="9"/><line x1="12" y1="12" x2="12" y2="15"/>'
+            '<line x1="12" y1="18" x2="12" y2="20"/>'
+        ),
+    }
+    body = icons.get(name, icons["bike"])
+    cls_attr = f' class="{cls}"' if cls else ""
+    return (
+        f'<svg{cls_attr} width="{size}" height="{size}" viewBox="0 0 24 24" '
+        'fill="none" stroke="currentColor" stroke-width="2" '
+        'stroke-linecap="round" stroke-linejoin="round" '
+        'style="display:inline-block;vertical-align:-0.15em;flex-shrink:0;" '
+        f'aria-hidden="true">{body}</svg>'
+    )
+
+
 # --- Helper Navigation Component ---
 def render_navbar(active_page: str, beta_mode: bool = False, state: Optional[State] = None) -> Component:
-    """Build persistent header navbar across all SafeCycle pages with live saved count, theme & render sync."""
+    """Build unified 3-zone topbar navbar across all SafeCycle pages with theme & render sync."""
     saved_count = 0
     if beta_mode:
         try:
@@ -5607,99 +6418,88 @@ def render_navbar(active_page: str, beta_mode: bool = False, state: Optional[Sta
     is_dark = bool(getattr(state, "dark_mode", False)) if state is not None else False
     theme_mode = "dark" if is_dark else "light"
     render_stamp = str(time.monotonic_ns())
-    html = f"""
+
+    sync_and_brand_html = f"""
     <div id="safecycle_theme_sync" data-safecycle-theme="{theme_mode}"
          data-render-id="{render_stamp}" style="display: none;"></div>
-    <div class="safecycle-navbar">
-        <div class="safecycle-brand">
-            🚲 SafeCycle
-            <small>Find your safer way</small>
-        </div>
-        <div style="font-size: 0.8rem; color: #a7f3d0;">
-            Safety First. Distance & Speed Second.
-        </div>
+    <div class="safecycle-brand">
+        <span class="sc-brand-mark">{sc_icon("bike", 19)}</span>
+        <span class="sc-brand-text">
+            <span class="sc-brand-name">SafeCycle</span>
+            <span class="sc-brand-tag">Safety-First Bike Routing</span>
+        </span>
     </div>
     """
+
+    def _nav_cls(page_key: str, ico: str) -> str:
+        base = "sc-btn sc-btn-nav-active" if active_page == page_key else "sc-btn sc-btn-nav"
+        return f"{base} {ico}"
+
     nav_buttons = [
-        Button("🗺️ Route Planner", go_to_planner),
-        Button("📊 Route Results", go_to_results),
+        Button("Route Planner", go_to_planner, classes=_nav_cls("planner", "sc-ico-map")),
+        Button("Route Results", go_to_results, classes=_nav_cls("results", "sc-ico-chart")),
     ]
     if beta_mode:
-        nav_buttons.append(Button("🧭 Live GPS Navigation (Beta)", go_to_navigation))
-        saved_label = f"💾 Saved Routes ({saved_count}) (Beta)" if saved_count > 0 else "💾 Saved Routes (Beta)"
-        nav_buttons.append(Button(saved_label, go_to_saved))
-
-        # Prominent Quick-Save Route action when an active planned route exists in state (Beta)
+        nav_buttons.append(
+            Button("Live GPS (Beta)", go_to_navigation, classes=_nav_cls("navigation", "sc-ico-compass"))
+        )
+        saved_label = f"Saved ({saved_count}) (Beta)" if saved_count > 0 else "Saved Routes (Beta)"
+        nav_buttons.append(
+            Button(saved_label, go_to_saved, classes=_nav_cls("saved", "sc-ico-bookmark"))
+        )
         if state is not None and getattr(state, "start_address", None) and getattr(state, "dest_address", None):
-            save_style = (
-                "background: #047857; color: white; border: none; padding: 6px 14px; "
-                "border-radius: 6px; font-weight: 700; "
-                "box-shadow: 0 2px 4px rgba(4,120,87,0.25); cursor: pointer;"
-            )
             nav_buttons.append(
-                Button("⭐ Save Route (Beta)", handle_save_current_route, style=save_style)
+                Button(
+                    "Save Route",
+                    handle_save_current_route,
+                    classes="sc-btn sc-btn-brand sc-btn-sm sc-ico-star",
+                )
             )
 
-    nav_buttons.append(Button("ℹ️ About Safety Score", go_to_about))
+    nav_buttons.append(
+        Button("About Safety", go_to_about, classes=_nav_cls("about", "sc-ico-info"))
+    )
+
+    dark_label = "Light" if is_dark else "Dark"
+    dark_cls = f"sc-btn sc-btn-theme {'sc-ico-sun' if is_dark else 'sc-ico-moon'}"
 
     return Div([
-        RawHTML(html),
-        Row(nav_buttons, style="gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;")
-    ])
+        RawHTML(sync_and_brand_html),
+        Row(nav_buttons, classes="sc-nav-center"),
+        Row([
+            Button(dark_label, toggle_dark_mode, classes=dark_cls)
+        ], classes="sc-nav-right"),
+    ], classes="sc-topbar")
+
 
 SHOW_BETA_TOGGLE = False
 
-def render_beta_corner_toggle(state: State) -> Component:
-    """Render small bottom-right corner Dark Mode button and optional Beta Mode toggle."""
-    is_dark = bool(getattr(state, "dark_mode", False))
-    dark_label = "☀️ Light" if is_dark else "🌙 Dark"
-    dark_btn_style = (
-        "background: #1e293b; color: #f8fafc; border: 1px solid #10b981; "
-        "font-size: 0.72rem; font-weight: 700; padding: 5px 11px; "
-        "border-radius: 9999px; box-shadow: 0 2px 8px rgba(0,0,0,0.28); "
-        "cursor: pointer; margin: 0; line-height: 1.2;"
-        if is_dark else
-        "background: #0f172a; color: #f8fafc; border: 1px solid #334155; "
-        "font-size: 0.72rem; font-weight: 700; padding: 5px 11px; "
-        "border-radius: 9999px; box-shadow: 0 2px 8px rgba(0,0,0,0.18); "
-        "cursor: pointer; margin: 0; line-height: 1.2;"
-    )
-    dark_corner_btn = Div([
-        Button(dark_label, toggle_dark_mode, style=dark_btn_style)
-    ], style="position: fixed; bottom: 14px; right: 14px; z-index: 9990;")
 
+def render_beta_corner_toggle(state: State) -> Component:
+    """Render optional Beta Mode footer toggle when SHOW_BETA_TOGGLE is enabled."""
     if not SHOW_BETA_TOGGLE:
-        return dark_corner_btn
+        return Div([])
 
     is_on = state.beta_mode
-    status_label = "🧪 Beta Mode: ON" if is_on else "🧪 Beta Mode: OFF"
-    btn_bg = "#047857" if is_on else "#ffffff"
-    btn_color = "#ffffff" if is_on else "#475569"
-    btn_border = "1.5px solid #059669" if is_on else "1.5px solid #cbd5e1"
-    if is_on:
-        hint_text = "Beta features active (Live GPS Navigation, Saved Routes & Benchmarks)"
-    else:
-        hint_text = "Enable experimental features (Live GPS, Saved Routes & Benchmarks)"
-    btn_style = (
-        f"background: {btn_bg}; color: {btn_color}; border: {btn_border}; "
-        "font-size: 0.78rem; font-weight: 700; padding: 6px 14px; "
-        "border-radius: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.06); "
-        "cursor: pointer; transition: all 0.15s ease;"
+    status_label = "Beta Mode: ON" if is_on else "Beta Mode: OFF"
+    btn_cls = "sc-btn sc-btn-sm sc-ico-flask " + ("sc-btn-brand" if is_on else "sc-btn-secondary")
+    hint_text = (
+        "Beta features active (Live GPS Navigation, Saved Routes & Diagnostics)"
+        if is_on else
+        "Enable experimental features (Live GPS, Saved Routes & Diagnostics)"
     )
     row_style = (
-        "display: flex; align-items: center; justify-content: flex-end; "
-        "padding: 16px 4px 6px 4px; margin-top: 28px; border-top: 1px dashed #cbd5e1;"
+        "display: flex; align-items: center; justify-content: flex-end; gap: 10px; "
+        "padding: 16px 4px 6px 4px; margin-top: 24px; border-top: 1px dashed #cbd5e1;"
     )
 
     return Div([
-        Div([
-            RawHTML(f'<span style="font-size: 0.75rem; color: #64748b; margin-right: 10px;">{hint_text}</span>'),
-            Button(status_label, toggle_beta_mode, style=btn_style)
-        ], style=row_style),
-        dark_corner_btn,
-    ])
+        RawHTML(f'<span style="font-size: 0.78rem; color: #64748b;">{hint_text}</span>'),
+        Button(status_label, toggle_beta_mode, classes=btn_cls),
+    ], style=row_style)
 
-# --- Strava Route Cards & Visual Elevation Engine ---
+
+# --- Route Cards & Visual Elevation Engine ---
 def generate_elevation_sparkline_svg(route: RouteOption, r_type: str, is_active: bool = False) -> str:
     """Generate an inline SVG contour sparkline showing route topography, elevation gain, and safety color gradient."""
     if r_type == "Safest":
@@ -5710,21 +6510,21 @@ def generate_elevation_sparkline_svg(route: RouteOption, r_type: str, is_active:
         grad_id = f"grad_safest_{'act' if is_active else 'in'}"
     elif r_type == "Balanced":
         pts = [(0, 42), (40, 34), (80, 25), (120, 22), (160, 27), (200, 31), (240, 25), (280, 37)]
-        stroke_color = "#0284c7"
-        grad_stop1 = "rgba(2, 132, 199, 0.45)"
-        grad_stop2 = "rgba(2, 132, 199, 0.05)"
+        stroke_color = "#2563eb"
+        grad_stop1 = "rgba(37, 99, 235, 0.40)"
+        grad_stop2 = "rgba(37, 99, 235, 0.04)"
         grad_id = f"grad_balanced_{'act' if is_active else 'in'}"
     elif r_type == "Direct":
         pts = [(0, 44), (40, 30), (80, 16), (120, 12), (160, 18), (200, 24), (240, 20), (280, 40)]
-        stroke_color = "#f97316"
-        grad_stop1 = "rgba(249, 115, 22, 0.45)"
-        grad_stop2 = "rgba(249, 115, 22, 0.05)"
+        stroke_color = "#ea580c"
+        grad_stop1 = "rgba(234, 88, 12, 0.40)"
+        grad_stop2 = "rgba(234, 88, 12, 0.04)"
         grad_id = f"grad_direct_{'act' if is_active else 'in'}"
     else:
         pts = [(0, 40), (40, 32), (80, 24), (120, 22), (160, 26), (200, 29), (240, 25), (280, 38)]
-        stroke_color = "#7c3aed"
-        grad_stop1 = "rgba(124, 58, 237, 0.45)"
-        grad_stop2 = "rgba(124, 58, 237, 0.05)"
+        stroke_color = "#6366f1"
+        grad_stop1 = "rgba(99, 102, 241, 0.40)"
+        grad_stop2 = "rgba(99, 102, 241, 0.04)"
         safe_r_id = r_type.replace(' ', '_').lower()
         grad_id = f"grad_{safe_r_id}_{'act' if is_active else 'in'}"
 
@@ -5732,19 +6532,22 @@ def generate_elevation_sparkline_svg(route: RouteOption, r_type: str, is_active:
     area_d = f"{path_d} L {pts[-1][0]} 48 L {pts[0][0]} 48 Z"
 
     elev_ft = route.elevation_gain_m * 3.28084
-
     elev_ft_str = format_number(elev_ft, 0)
     elev_m_str = format_number(route.elevation_gain_m, 0)
 
     hdr_style = (
-        "display: flex; justify-content: space-between; font-size: 0.72rem; "
-        "color: #64748b; font-weight: 600; margin-bottom: 2px;"
+        "display: flex; justify-content: space-between; align-items: center; "
+        "font-size: 0.74rem; color: #64748b; font-weight: 600; margin-bottom: 4px;"
     )
     return f"""
     <div style="position: relative;">
         <div style="{hdr_style}">
-            <span>📈 Elevation Profile</span>
-            <span style="color: {stroke_color};">▲ {elev_ft_str} ft gain ({elev_m_str} m)</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;">
+                {sc_icon("mountain", 13)} Elevation Profile
+            </span>
+            <span class="sc-mono" style="color: {stroke_color};">
+                +{elev_ft_str} ft ({elev_m_str} m)
+            </span>
         </div>
         <svg viewBox="0 0 280 48" style="width: 100%; height: 44px; display: block;" preserveAspectRatio="none">
             <defs>
@@ -5761,50 +6564,44 @@ def generate_elevation_sparkline_svg(route: RouteOption, r_type: str, is_active:
     </div>
     """
 
+
 def sanitize_route_dom_id(r_type: str) -> str:
     """Sanitize route type name for use in HTML ID attributes (matches JS rType.replace(/[^a-zA-Z0-9_]/g, '_'))."""
     return re.sub(r'[^a-zA-Z0-9_]', '_', r_type)
+
 
 def render_safety_mode_banner(advanced_mode: bool) -> Component:
     """Render the Basic vs Advanced Safety Mode switcher banner."""
     if advanced_mode:
         badge_html = (
             '<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">'
-            '<span style="background: #047857; color: #ffffff; padding: 4px 12px; '
-            'border-radius: 9999px; font-size: 0.78rem; font-weight: 800;">'
-            '🔬 Advanced Safety Mode</span>'
+            '<span style="background: #047857; color: #ffffff; padding: 4px 10px; '
+            'border-radius: 6px; font-size: 0.76rem; font-weight: 700; '
+            'display: inline-flex; align-items: center; gap: 5px;">'
+            f'{sc_icon("sliders", 13)} Advanced Safety Mode</span>'
             '<span style="font-size: 0.84rem; color: #334155;">'
-            'Showing full telemetry: elevation curves, surface protection splits, '
-            'risk spectrum, alternative corridors &amp; crash records.</span></div>'
+            'Showing official crash records, data confidence, and DOT evidence notes.</span></div>'
         )
-        btn_label = "🌱 Switch to Basic Mode"
-        btn_style = (
-            "background: #ffffff; color: #064e3b; border: 1.5px solid #059669; "
-            "padding: 7px 15px; border-radius: 8px; font-weight: 700; "
-            "font-size: 0.82rem; cursor: pointer;"
-        )
+        btn_label = "Basic View"
+        btn_cls = "sc-btn sc-btn-secondary sc-btn-sm sc-ico-layers"
         cls_name = "safecycle-mode-switcher is-advanced"
     else:
         badge_html = (
             '<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">'
-            '<span style="background: #0f172a; color: #f8fafc; padding: 4px 12px; '
-            'border-radius: 9999px; font-size: 0.78rem; font-weight: 800;">'
-            '🌱 Basic Safety View</span>'
+            '<span style="background: #0f172a; color: #f8fafc; padding: 4px 10px; '
+            'border-radius: 6px; font-size: 0.76rem; font-weight: 700; '
+            'display: inline-flex; align-items: center; gap: 5px;">'
+            f'{sc_icon("shield_check", 13)} Basic Safety View</span>'
             '<span style="font-size: 0.84rem; color: #475569;">'
-            'Clean overview with core safety scores, ride time &amp; top alerts. '
-            'Want full road telemetry?</span></div>'
+            'Streamlined summary. Switch to Advanced Mode for crash records and DOT evidence.</span></div>'
         )
-        btn_label = "🔬 Switch to Advanced Mode"
-        btn_style = (
-            "background: #047857; color: #ffffff; border: none; "
-            "padding: 7px 15px; border-radius: 8px; font-weight: 700; "
-            "font-size: 0.82rem; cursor: pointer;"
-        )
+        btn_label = "Advanced Mode"
+        btn_cls = "sc-btn sc-btn-brand sc-btn-sm sc-ico-sliders"
         cls_name = "safecycle-mode-switcher"
 
     return Div([
         RawHTML(badge_html),
-        Button(btn_label, toggle_advanced_mode, style=btn_style),
+        Button(btn_label, toggle_advanced_mode, classes=btn_cls),
     ], classes=cls_name)
 
 
@@ -5816,13 +6613,14 @@ def render_strava_route_card(
     planned_speed_mph: Any = 12.0,
     departure_time: str = "8:30 AM",
     advanced_mode: bool = False,
+    single_view: bool = False,
 ) -> Component:
-    """Build a Strava-style route option card in streamlined Basic Mode or full-telemetry Advanced Mode."""
+    """Build a clean route overview card in streamlined Basic View or telemetry-rich Advanced Mode."""
     dist_mi = route.total_distance_km * 0.621371
     elev_ft = route.elevation_gain_m * 3.28084
     tot_km = max(0.1, route.total_distance_km)
     spd_float = parse_speed_mph(planned_speed_mph)
-    start_fmt, end_fmt, sched_summary = compute_trip_schedule(departure_time, route.estimated_duration_mins)
+    start_fmt, end_fmt, _ = compute_trip_schedule(departure_time, route.estimated_duration_mins)
     dur_val, dur_unit = format_duration_parts(route.estimated_duration_mins)
     dur_text = f"{dur_val} {dur_unit}"
     dist_mi_str = format_number(dist_mi, 1)
@@ -5833,11 +6631,14 @@ def render_strava_route_card(
     prot_types = ("protected_bike_path", "separated_lane")
     lane_types = ("painted_lane", "traffic_calmed_street")
     sh_types = ("paved_shoulder", "shoulder", "bike_shoulder")
-
     safe_id = sanitize_route_dom_id(r_type)
 
+    ok_ico = sc_icon("check", 14)
+    warn_ico = sc_icon("alert", 14)
+    bike_ico = sc_icon("bike", 14)
+
     if r_type == "Safest":
-        icon = "🛡️"
+        icon_svg = sc_icon("shield_check", 17)
         tag = "SAFEST ROUTE"
         sub_desc = "Maximum physical protection & low-speed paths"
         score_bg = "#ecfdf5"
@@ -5847,12 +6648,14 @@ def render_strava_route_card(
         min_spd = min((s.speed_limit_mph or 15 for s in route.segments), default=15)
         max_spd = max((s.speed_limit_mph or 25 for s in route.segments), default=25)
         features = [
-            "✅ Grade-separated cycleway & park trails",
-            f"✅ Low traffic exposure & {min_spd}-{max_spd} mph speeds",
-            "✅ 0 high-risk motor conflict segments"
+            f'<span style="color:#047857;">{ok_ico}</span><span>Grade-separated cycleway &amp; park trails</span>',
+            f'<span style="color:#047857;">{ok_ico}</span><span>Low traffic exposure &amp; '
+            f'{min_spd}-{max_spd} mph speeds</span>',
+            f'<span style="color:#047857;">{ok_ico}</span><span>{route.high_risk_segments_count:,} '
+            'high-risk motor conflict segments</span>',
         ]
     elif r_type == "Balanced":
-        icon = "⚖️"
+        icon_svg = sc_icon("scale", 17)
         tag = "BALANCED CORRIDOR"
         sub_desc = "Optimal mix of speed & dedicated bike lanes"
         score_bg = "#eff6ff"
@@ -5860,12 +6663,12 @@ def render_strava_route_card(
         score_border = "#bfdbfe"
         score_label = "BALANCED SAFETY"
         features = [
-            "✅ Marked bike lanes and quiet byways",
-            "✅ Reduced detour time vs safest option",
-            "⚠️ Moderate traffic on connecting links"
+            f'<span style="color:#047857;">{ok_ico}</span><span>Marked bike lanes and quiet byways</span>',
+            f'<span style="color:#047857;">{ok_ico}</span><span>Reduced detour time vs safest option</span>',
+            f'<span style="color:#b45309;">{warn_ico}</span><span>Moderate traffic on connecting links</span>',
         ]
     elif r_type == "Direct":
-        icon = "⚡"
+        icon_svg = sc_icon("zap", 17)
         tag = "DIRECT / EXPRESS"
         sub_desc = "Direct corridor along major thoroughfares"
         score_bg = "#fff1f2"
@@ -5876,28 +6679,41 @@ def render_strava_route_card(
         has_shoulder = any(s.infrastructure in sh_types for s in route.segments)
         has_lane = any(s.infrastructure in lane_types for s in route.segments)
         if has_shoulder:
-            infra_feat = "🚲 Wide paved bike shoulders on highway corridor"
+            infra_feat = (
+                f'<span style="color:#0284c7;">{bike_ico}</span>'
+                '<span>Wide paved bike shoulders on highway corridor</span>'
+            )
         elif has_lane:
-            infra_feat = "🚲 Marked bike lanes on arterial corridor"
+            infra_feat = (
+                f'<span style="color:#0284c7;">{bike_ico}</span>'
+                '<span>Marked bike lanes on arterial corridor</span>'
+            )
         else:
-            infra_feat = "🚲 ⚠️ Limited cycling protection: mix with traffic"
+            infra_feat = (
+                f'<span style="color:#b91c1c;">{warn_ico}</span>'
+                '<span>Limited cycling protection: mix with traffic</span>'
+            )
         features = [
-            "⚡ Shortest distance & travel time",
+            f'<span style="color:#2563eb;">{sc_icon("zap", 14)}</span>'
+            '<span>Shortest distance &amp; travel time</span>',
             infra_feat,
-            f"⚠️ Higher vehicular speeds ({max_spd} mph limit)"
+            f'<span style="color:#b91c1c;">{warn_ico}</span>'
+            f'<span>Higher vehicular speeds ({max_spd} mph limit)</span>',
         ]
     else:
-        icon = "🚲"
+        icon_svg = sc_icon("compass", 17)
         tag = f"{r_type.upper()}"
         sub_desc = "Alternative cycling path corridor"
         score_bg = "#f5f3ff"
-        score_text = "#6d28d9"
+        score_text = "#5b21b6"
         score_border = "#ddd6fe"
         score_label = f"SAFETY {route.overall_safety_score:.0f}/100"
         features = [
-            f"🚴 Distance: {dist_mi_str} mi ({dist_km_str} km)",
-            f"⏱️ Ride Time: {dur_text}",
-            f"🛡️ Safety score: {route.overall_safety_score:.0f}/100"
+            f'<span style="color:#5b21b6;">{bike_ico}</span>'
+            f'<span>Distance: {dist_mi_str} mi ({dist_km_str} km)</span>',
+            f'<span style="color:#5b21b6;">{sc_icon("clock", 14)}</span><span>Ride Time: {dur_text}</span>',
+            f'<span style="color:#5b21b6;">{sc_icon("shield", 14)}</span>'
+            f'<span>Safety score: {route.overall_safety_score:.0f}/100</span>',
         ]
 
     active_class = "active" if is_active else ""
@@ -5932,9 +6748,9 @@ def render_strava_route_card(
             surface_labels.append(f"{pct_shared:.0f}% Shared")
         if pct_none > 0.5:
             surface_labels.append(f"{pct_none:.0f}% No Lane")
-        surface_summary_str = " • ".join(surface_labels[:3]) or "Standard roadway"
+        surface_summary_str = " &bull; ".join(surface_labels[:3]) or "Standard roadway"
 
-        dot_css = "display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px;"
+        dot_css = "display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;"
         bar_prot = (
             f'<div style="width: {pct_protected}%; background: #16a34a;" '
             f'title="Protected Cycleway {pct_protected:.0f}%"></div>'
@@ -5988,7 +6804,7 @@ def render_strava_route_card(
         spectrum_bar_html = f"""
         <div>
             <div style="{surf_hdr_style}">
-                <span>Surface & Protection:</span>
+                <span>Surface &amp; Protection</span>
                 <span>{surface_summary_str}</span>
             </div>
             <div class="strava-spectrum-bar">
@@ -6008,83 +6824,103 @@ def render_strava_route_card(
         </div>
         """
 
-    if not advanced_mode:
-        features = features[:2]
     features_html = "".join([f"<li>{f}</li>" for f in features])
-    card_style = (
-        "cursor: pointer; display: flex; flex-direction: column; "
-        "justify-content: space-between; height: 100%;"
-    )
     pill_cls = "strava-pill-active" if is_active else "strava-pill-alt"
-    pill_txt = "✓ ACTIVE ROUTE" if is_active else "ALTERNATIVE"
+    pill_txt = "SELECTED" if is_active else "ALTERNATIVE"
     sched_style = (
-        "background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 8px; "
-        "padding: 6px 12px; margin-bottom: 10px; display: flex; "
-        "justify-content: space-between; align-items: center; font-size: 0.82rem;"
+        "background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; "
+        "padding: 7px 12px; margin-bottom: 10px; display: flex; "
+        "justify-content: space-between; align-items: center; font-size: 0.81rem;"
     )
     score_style = f"background: {score_bg}; color: {score_text}; border: 1px solid {score_border};"
-    sel_btn_bg = "#FC5200" if is_active else "#ffffff"
-    sel_btn_fg = "#ffffff" if is_active else "#1e293b"
-    sel_btn_bd = "none" if is_active else "2px solid #cbd5e1"
-    sel_btn_style = (
-        f"background: {sel_btn_bg}; color: {sel_btn_fg}; font-weight: 700; "
-        f"width: 100%; padding: {'8px 10px' if not advanced_mode else '10px'}; "
-        f"border-radius: 8px; border: {sel_btn_bd}; cursor: pointer; "
-        f"font-size: {'0.84rem' if not advanced_mode else '0.9rem'}; "
-        "transition: all 0.15s ease;"
-    )
-    sel_btn_txt = (
-        "✓ Active Route (Selected on Map)"
-        if is_active else f"Select {r_type} Route ➔"
-    )
+
+    footer_btn_html = ""
+    if not single_view:
+        sel_btn_bg = "#047857" if is_active else "#ffffff"
+        sel_btn_fg = "#ffffff" if is_active else "#1e293b"
+        sel_btn_bd = "1px solid #047857" if is_active else "1px solid #cbd5e1"
+        sel_btn_style = (
+            f"background: {sel_btn_bg}; color: {sel_btn_fg}; font-weight: 600; "
+            "width: 100%; padding: 8px 12px; border-radius: 8px; "
+            f"border: {sel_btn_bd}; cursor: pointer; font-size: 0.84rem;"
+        )
+        sel_btn_txt = "Active Route (Selected)" if is_active else f"Select {r_type} Route"
+        footer_btn_html = f"""
+        <div style="margin-top: 10px;">
+            <button id="strava_card_btn_{safe_id}" type="button"
+                onclick="event.stopPropagation(); window.safecycleSelectRoute('{r_type}');"
+                style="{sel_btn_style}">
+                {sel_btn_txt}
+            </button>
+        </div>
+        """
 
     if not advanced_mode:
-        if r_type == "Safest":
-            basic_summary = "Protected paths & quiet low-traffic streets"
+        sc_val = float(route.overall_safety_score or 0.0)
+        if sc_val >= 75.0:
             basic_tier = "Very Safe"
+            basic_pill_style = "background:#ecfdf5;color:#065f46;border-color:#a7f3d0;"
+        elif sc_val >= 50.0:
+            basic_tier = "Moderate Risk"
+            basic_pill_style = "background:#fefce8;color:#854d0e;border-color:#fde047;"
+        elif sc_val >= 35.0:
+            basic_tier = "Elevated Risk"
+            basic_pill_style = "background:#fff7ed;color:#9a3412;border-color:#fdba74;"
+        else:
+            basic_tier = "High Risk"
+            basic_pill_style = "background:#fef2f2;color:#991b1b;border-color:#fca5a5;"
+
+        if r_type == "Safest":
+            basic_summary = "Protected paths and quiet low-traffic streets"
         elif r_type == "Balanced":
-            basic_summary = "Bike lanes & shorter connecting roads"
-            basic_tier = "Balanced"
+            basic_summary = "Dedicated bike lanes and shorter connecting roads"
         elif r_type == "Direct":
             max_spd = max((s.speed_limit_mph or 35 for s in route.segments), default=35)
-            basic_summary = f"Shortest route • higher speeds ({max_spd} mph)"
-            basic_tier = "Faster"
+            basic_summary = f"Shortest route &bull; higher speeds ({max_spd} mph)"
         else:
             basic_summary = (
-                f"{route.bike_infrastructure_percentage:.0f}% bikeway • "
+                f"{route.bike_infrastructure_percentage:.0f}% bikeway &bull; "
                 f"{route.high_risk_segments_count} caution spots"
             )
-            basic_tier = "Option"
 
         card_content_html = f"""
-        <div id="strava_card_{safe_id}" class="strava-card is-basic {active_class}"
-             style="{card_style}" onclick="window.safecycleSelectRoute('{r_type}')">
+        <div id="strava_card_{safe_id}" class="strava-card is-basic {active_class}">
             <div>
-                <div class="strava-card-top" style="margin-bottom: 4px;">
-                    <div class="strava-tag-badge" style="color: {'#FC5200' if is_active else '#0f172a'};">
-                        <span>{icon}</span> {r_type}
+                <div class="strava-card-top">
+                    <div class="strava-tag-badge" style="color: #0f172a;">
+                        <span style="color: {score_text};">{icon_svg}</span> {r_type} Route
                     </div>
-                    <span id="strava_card_pill_{safe_id}" class="{pill_cls}">
-                        {pill_txt}
+                    <span id="strava_card_pill_{safe_id}" class="{pill_cls}"
+                          style="{basic_pill_style}">
+                        {basic_tier}
+                    </span>
+                </div>
+
+                <div style="{sched_style}">
+                    <span style="color: #475569; display: inline-flex; align-items: center; gap: 5px;">
+                        {sc_icon("clock", 13)} {start_fmt} &rarr; {end_fmt}
+                    </span>
+                    <span class="sc-mono" style="color: #0f172a; font-weight: 600;">
+                        {spd_float:.0f} mph
                     </span>
                 </div>
 
                 <div class="safecycle-basic-metrics">
                     <div>
                         <div class="strava-stat-val safecycle-basic-score"
-                             style="color: {score_text}; font-size: 1.08rem;">
+                             style="color: {score_text}; font-size: 1.15rem;">
                             {route.overall_safety_score:.0f}<span class="strava-stat-unit">/100</span>
                         </div>
-                        <div class="strava-stat-lbl">{basic_tier}</div>
+                        <div class="strava-stat-lbl">Safety</div>
                     </div>
                     <div>
-                        <div class="strava-stat-val" style="font-size: 1.08rem;">
+                        <div class="strava-stat-val" style="font-size: 1.15rem;">
                             {dur_val}<span class="strava-stat-unit"> {dur_unit}</span>
                         </div>
-                        <div class="strava-stat-lbl">Arr. {end_fmt}</div>
+                        <div class="strava-stat-lbl">Ride Time</div>
                     </div>
                     <div>
-                        <div class="strava-stat-val" style="font-size: 1.08rem;">
+                        <div class="strava-stat-val" style="font-size: 1.15rem;">
                             {dist_mi_str}<span class="strava-stat-unit"> mi</span>
                         </div>
                         <div class="strava-stat-lbl">Distance</div>
@@ -6093,22 +6929,14 @@ def render_strava_route_card(
 
                 <div class="safecycle-basic-note">{basic_summary}</div>
             </div>
-            <div>
-                <button id="strava_card_btn_{safe_id}" type="button"
-                    onclick="event.stopPropagation(); window.safecycleSelectRoute('{r_type}');"
-                    style="{sel_btn_style}">
-                    {sel_btn_txt}
-                </button>
-            </div>
+            {footer_btn_html}
         </div>
         """
 
-        return Div([
-            RawHTML(card_content_html)
-        ], style="flex: 1; min-width: 240px;")
+        return Div([RawHTML(card_content_html)])
 
     middle_metric_html = (
-        f'<div class="strava-stat-val">▲ {elev_ft_str} <span class="strava-stat-unit">ft</span></div>'
+        f'<div class="strava-stat-val">+{elev_ft_str} <span class="strava-stat-unit">ft</span></div>'
         f'<div class="strava-stat-sub">({elev_m_str} m)</div>'
         '<div class="strava-stat-lbl">ELEV. GAIN</div>'
     )
@@ -6120,12 +6948,11 @@ def render_strava_route_card(
     """
 
     card_content_html = f"""
-    <div id="strava_card_{safe_id}" class="strava-card {active_class}"
-         style="{card_style}" onclick="window.safecycleSelectRoute('{r_type}')">
+    <div id="strava_card_{safe_id}" class="strava-card {active_class}">
         <div>
             <div class="strava-card-top">
-                <div class="strava-tag-badge" style="color: {'#FC5200' if is_active else '#0f172a'};">
-                    <span style="font-size: 1.1rem;">{icon}</span> {tag}
+                <div class="strava-tag-badge" style="color: #0f172a;">
+                    <span style="color: {score_text};">{icon_svg}</span> {tag}
                 </div>
                 <span id="strava_card_pill_{safe_id}" class="{pill_cls}">
                     {pill_txt}
@@ -6134,11 +6961,11 @@ def render_strava_route_card(
             <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 8px;">{sub_desc}</div>
 
             <div style="{sched_style}">
-                <span style="color: #475569; font-weight: 600;">
-                    🚴 Start: <strong style="color: #0f172a;">{start_fmt}</strong>
+                <span style="color: #475569; font-weight: 600; display: inline-flex; align-items: center; gap: 5px;">
+                    {bike_ico} Start: <strong style="color: #0f172a;">{start_fmt}</strong>
                 </span>
-                <span style="color: #047857; font-weight: 700;">
-                    🏁 Arrive: <strong>{end_fmt}</strong>
+                <span style="color: #047857; font-weight: 700; display: inline-flex; align-items: center; gap: 5px;">
+                    {sc_icon("flag", 13)} Arrive: <strong>{end_fmt}</strong>
                 </span>
             </div>
 
@@ -6160,10 +6987,12 @@ def render_strava_route_card(
 
             <div class="strava-score-row" style="{score_style}">
                 <div>
-                    <span style="font-size: 1.15rem; font-weight: 800;">{route.overall_safety_score:.0f}</span>
+                    <span class="sc-mono" style="font-size: 1.15rem; font-weight: 800;">
+                        {route.overall_safety_score:.0f}
+                    </span>
                     <span style="font-size: 0.8rem; opacity: 0.85;"> / 100 Safety Score</span>
                 </div>
-                <span style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px;">
+                <span style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.4px;">
                     {score_label}
                 </span>
             </div>
@@ -6174,19 +7003,12 @@ def render_strava_route_card(
                 {features_html}
             </ul>
         </div>
-        <div style="margin-top: 12px;">
-            <button id="strava_card_btn_{safe_id}" type="button"
-                onclick="event.stopPropagation(); window.safecycleSelectRoute('{r_type}');"
-                style="{sel_btn_style}">
-                {sel_btn_txt}
-            </button>
-        </div>
+        {footer_btn_html}
     </div>
     """
 
-    return Div([
-        RawHTML(card_content_html)
-    ], style="flex: 1; min-width: 280px;")
+    return Div([RawHTML(card_content_html)])
+
 
 def render_possible_route_card(
     route: RouteOption,
@@ -6195,11 +7017,7 @@ def render_possible_route_card(
     planned_speed_mph: Any = 12.0,
     departure_time: str = "8:30 AM"
 ) -> Component:
-    """
-    Renders an unselected possible route alternative card.
-    These represent viable cycling through-corridors that are not actively recommended
-    (e.g., detour without proportional safety gain, or follows general street rather than dedicated bikeway).
-    """
+    """Render an unselected possible route alternative card without emojis."""
     dist_mi = route.total_distance_km * 0.621371
     elev_ft = route.elevation_gain_m * 3.28084
     tot_km = max(0.1, route.total_distance_km)
@@ -6226,26 +7044,25 @@ def render_possible_route_card(
 
     p_border = "#6366f1" if is_active else "#cbd5e1"
     p_bg = "#ffffff" if is_active else "#fafafa"
-    p_shadow = "0 6px 20px rgba(99, 102, 241, 0.18)" if is_active else "0 2px 6px rgba(0,0,0,0.04)"
     p_card_style = (
         "cursor: pointer; display: flex; flex-direction: column; "
-        f"justify-content: space-between; height: 100%; border: 1.5px solid {p_border}; "
-        f"background: {p_bg}; border-radius: 12px; padding: 16px; box-shadow: {p_shadow};"
+        f"justify-content: space-between; height: 100%; border: 1px solid {p_border}; "
+        f"background: {p_bg}; border-radius: 10px; padding: 14px;"
     )
     p_top_style = (
         "display: flex; justify-content: space-between; "
         "align-items: flex-start; margin-bottom: 8px;"
     )
     p_tag_style = (
-        "color: #4338ca; font-weight: 800; font-size: 0.88rem; "
-        "display: flex; align-items: center; gap: 6px;"
+        "color: #4338ca; font-weight: 700; font-size: 0.9rem; "
+        "display: inline-flex; align-items: center; gap: 6px;"
     )
     p_pill_cls = "strava-pill-active" if is_active else "strava-pill-alt"
     p_pill_bg = "#4338ca" if is_active else "#f1f5f9"
     p_pill_fg = "#ffffff" if is_active else "#64748b"
     p_pill_style = (
         f"background: {p_pill_bg}; color: {p_pill_fg}; font-weight: 700; "
-        "font-size: 0.72rem; padding: 3px 8px; border-radius: 9999px;"
+        "font-size: 0.72rem; padding: 3px 8px; border-radius: 6px;"
     )
     p_sched_style = (
         "background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; "
@@ -6264,16 +7081,13 @@ def render_possible_route_card(
     )
     p_btn_bg = "#4338ca" if is_active else "#ffffff"
     p_btn_fg = "#ffffff" if is_active else "#4338ca"
-    p_btn_bd = "none" if is_active else "1.5px solid #c7d2fe"
+    p_btn_bd = "1px solid #4338ca" if is_active else "1px solid #c7d2fe"
     p_btn_style = (
-        f"background: {p_btn_bg}; color: {p_btn_fg}; font-weight: 700; width: 100%; "
-        f"padding: 8px 12px; border-radius: 6px; border: {p_btn_bd}; "
+        f"background: {p_btn_bg}; color: {p_btn_fg}; font-weight: 600; width: 100%; "
+        f"padding: 8px 12px; border-radius: 7px; border: {p_btn_bd}; "
         "cursor: pointer; font-size: 0.82rem; transition: all 0.15s ease;"
     )
-    p_btn_txt = (
-        "✓ Active on Map (Viewing Details)"
-        if is_active else "View Details & Select Route ➔"
-    )
+    p_btn_txt = "Active on Map" if is_active else "Select Route"
 
     card_content_html = f"""
     <div id="strava_card_{safe_id}" class="strava-card {active_class}"
@@ -6281,10 +7095,10 @@ def render_possible_route_card(
         <div>
             <div class="strava-card-top" style="{p_top_style}">
                 <div class="strava-tag-badge" style="{p_tag_style}">
-                    <span style="font-size: 1.1rem;">🧭</span> {corridor_display}
+                    {sc_icon("compass", 16)} {corridor_display}
                 </div>
                 <span id="strava_card_pill_{safe_id}" class="{p_pill_cls}" style="{p_pill_style}">
-                    {'✓ ACTIVE ON MAP' if is_active else 'POSSIBLE OPTION'}
+                    {'ACTIVE ON MAP' if is_active else 'POSSIBLE OPTION'}
                 </span>
             </div>
 
@@ -6293,7 +7107,9 @@ def render_possible_route_card(
             </div>
 
             <div style="{p_sched_style}">
-                <span style="color: #475569;">🚴 Start: <strong>{start_fmt}</strong></span>
+                <span style="color: #475569; display:inline-flex; align-items:center; gap:4px;">
+                    {sc_icon("clock", 13)} Start: <strong>{start_fmt}</strong>
+                </span>
                 <span style="color: #4338ca; font-weight: 700;">Arrive: <strong>{end_fmt}</strong></span>
             </div>
 
@@ -6304,7 +7120,7 @@ def render_possible_route_card(
                     <div class="strava-stat-lbl">DISTANCE</div>
                 </div>
                 <div>
-                    <div class="strava-stat-val">▲ {elev_ft_str} <span class="strava-stat-unit">ft</span></div>
+                    <div class="strava-stat-val">+{elev_ft_str} <span class="strava-stat-unit">ft</span></div>
                     <div class="strava-stat-sub">({elev_m_str} m)</div>
                     <div class="strava-stat-lbl">CLIMB</div>
                 </div>
@@ -6317,7 +7133,7 @@ def render_possible_route_card(
 
             <div style="{p_score_style}">
                 <div>
-                    <span style="font-size: 1.1rem; font-weight: 800; color: #4338ca;">
+                    <span class="sc-mono" style="font-size: 1.1rem; font-weight: 800; color: #4338ca;">
                         {route.overall_safety_score:.0f}
                     </span>
                     <span style="font-size: 0.78rem; color: #6d28d9;"> / 100 Safety Score</span>
@@ -6328,7 +7144,7 @@ def render_possible_route_card(
             </div>
 
             <div style="{p_warn_style}">
-                <strong>💡 Why Not Recommended:</strong> {non_rec_reason}
+                <strong>Why Not Recommended:</strong> {non_rec_reason}
             </div>
         </div>
 
@@ -6350,12 +7166,23 @@ def render_possible_route_card(
 def _build_cached_autocomplete_html() -> str:
     """Build and cache the static datalist and JavaScript autocomplete controller HTML."""
     datalist_options = "".join([
-        f'<option value="{loc["name"]}">{loc["category"]} • {loc["city"]}</option>'
+        f'<option value="{loc["name"]}">{loc["category"]} | {loc["city"]}</option>'
         for loc in CYCLING_LOCATIONS
     ])
     suggestions_json_str = get_suggestions_json()
     s_open = "<scr" + "ipt>"
     s_close = "</scr" + "ipt>"
+
+    ico_map_pin = sc_icon("pin", 16)
+    ico_park = sc_icon("mountain", 16)
+    ico_bike = sc_icon("bike", 16)
+    ico_bridge = sc_icon("road", 16)
+    ico_landmark = sc_icon("flag", 16)
+    ico_city = sc_icon("layers", 16)
+    ico_transit = sc_icon("compass", 16)
+    ico_campus = sc_icon("bookmark", 16)
+    ico_target = sc_icon("target", 16)
+    ico_water = sc_icon("globe", 16)
 
     return f"""
     <datalist id="safecycle_address_suggestions">
@@ -6365,6 +7192,22 @@ def _build_cached_autocomplete_html() -> str:
     {s_open}
     (function() {{
         const presets = {suggestions_json_str};
+        const SC_ICONS = {{
+            "pin": {json.dumps(ico_map_pin)},
+            "park": {json.dumps(ico_park)},
+            "bike": {json.dumps(ico_bike)},
+            "bridge": {json.dumps(ico_bridge)},
+            "landmark": {json.dumps(ico_landmark)},
+            "city": {json.dumps(ico_city)},
+            "transit": {json.dumps(ico_transit)},
+            "campus": {json.dumps(ico_campus)},
+            "target": {json.dumps(ico_target)},
+            "water": {json.dumps(ico_water)}
+        }};
+
+        function resolveAutocompleteIcon(key) {{
+            return SC_ICONS[key] || SC_ICONS.pin;
+        }}
 
         function formatPhoton(feat) {{
             const p = feat.properties || {{}};
@@ -6386,24 +7229,24 @@ def _build_cached_autocomplete_html() -> str:
             const subtitle = parts.join(", ") || fallbackCoord;
 
             const val = (p.osm_value || p.type || "").toLowerCase();
-            let icon = "📍";
+            let icon = "pin";
             let cat = "Address";
             if (["park", "garden", "forest", "nature_reserve"].includes(val)) {{
-                icon = "🌳"; cat = "Park";
+                icon = "park"; cat = "Park";
             }} else if (["cycleway", "path", "track", "bicycle"].includes(val)) {{
-                icon = "🚲"; cat = "Bikeway";
+                icon = "bike"; cat = "Bikeway";
             }} else if (["bridge", "viaduct"].includes(val)) {{
-                icon = "🌉"; cat = "Bridge";
+                icon = "bridge"; cat = "Bridge";
             }} else if (["museum", "attraction", "monument", "memorial", "castle", "viewpoint"].includes(val)) {{
-                icon = "🏛️"; cat = "Landmark";
+                icon = "landmark"; cat = "Landmark";
             }} else if (["city", "town", "village", "suburb"].includes(val)) {{
-                icon = "🏙️"; cat = "City";
+                icon = "city"; cat = "City";
             }} else if (["station", "bus_stop", "subway"].includes(val)) {{
-                icon = "🚉"; cat = "Transit";
+                icon = "transit"; cat = "Transit";
             }} else if (["university", "college", "school"].includes(val)) {{
-                icon = "🎓"; cat = "Campus";
+                icon = "campus"; cat = "Campus";
             }} else if (p.housenumber) {{
-                icon = "🏠"; cat = "Address";
+                icon = "pin"; cat = "Address";
             }}
 
             const full = title + (subtitle ? ", " + subtitle : "");
@@ -6427,7 +7270,7 @@ def _build_cached_autocomplete_html() -> str:
                 name: item.display_name || title,
                 title: title,
                 desc: subtitle,
-                icon: "📍",
+                icon: "pin",
                 category: (item.type || "Place").toUpperCase(),
                 lat: parseFloat(item.lat),
                 lon: parseFloat(item.lon),
@@ -6462,14 +7305,14 @@ def _build_cached_autocomplete_html() -> str:
                         dropdown.innerHTML =
                             '<div style="padding: 14px; text-align: center; color: #047857; '
                             + 'font-size: 0.85rem;"><span class="safecycle-spinner"></span> '
-                            + `Searching worldwide for "${{q}}"...</div>`;
+                            + `Searching locations for "${{q}}"...</div>`;
                         dropdown.style.display = "block";
                         return;
                     }}
                     dropdown.innerHTML =
                         '<div style="padding: 12px; color: #64748b; font-size: 0.82rem; '
-                        + `text-align: center;">No exact locations found for "${{q}}". `
-                        + 'You can still enter any street address, city, or coordinates.</div>';
+                        + `text-align: center;">No matches found for "${{q}}". `
+                        + 'Enter any street address, city, or coordinates.</div>';
                     dropdown.style.display = "block";
                     return;
                 }}
@@ -6477,16 +7320,17 @@ def _build_cached_autocomplete_html() -> str:
                 const loadingBadge = isLoading
                     ? '<span style="font-size: 0.7rem; color: #059669; font-weight: 600; margin-left: 8px;">'
                       + '<span class="safecycle-spinner" style="width:10px;height:10px;'
-                      + 'border-width:1.5px;margin-right:3px;"></span> Searching more...</span>'
+                      + 'border-width:1.5px;margin-right:3px;"></span> Searching...</span>'
                     : "";
                 let html =
-                    '<div style="padding: 6px 12px; background: #f8fafc; font-size: 0.72rem; '
+                    '<div style="padding: 6px 12px; background: #f8fafc; font-size: 0.7rem; '
                     + 'font-weight: 700; color: #64748b; text-transform: uppercase; '
-                    + 'letter-spacing: 0.5px; border-bottom: 1px solid #e2e8f0; display: flex; '
+                    + 'letter-spacing: 0.05em; border-bottom: 1px solid #e2e8f0; display: flex; '
                     + 'justify-content: space-between; align-items: center;">'
-                    + `<span>🌍 Global Location Suggestions (${{items.length}})</span>${{loadingBadge}}</div>`;
+                    + `<span style="display:inline-flex;align-items:center;gap:5px;">${{SC_ICONS.water}} `
+                    + `Locations (${{items.length}})</span>${{loadingBadge}}</div>`;
 
-                items.forEach((item, idx) => {{
+                items.forEach((item) => {{
                     let titleDisp = item.title || item.name;
                     if (q) {{
                         const cleanEsc = q.replace(/[-\\/\\\\^$*+?.()|[\\]{{}}]/g, "\\\\$&");
@@ -6498,7 +7342,7 @@ def _build_cached_autocomplete_html() -> str:
                         ? '<span class="item-cat-badge" style="background:#e0f2fe; color:#0369a1;">'
                           + `${{item.category || "Place"}}</span>`
                         : '<span class="item-cat-badge" style="background:#ecfdf5; color:#065f46; '
-                          + 'border:1px solid #a7f3d0;">⭐ Safe Bikeway</span>';
+                          + 'border:1px solid #a7f3d0;">Verified Bikeway</span>';
                     const tStyle = (
                         "font-weight: 600; color: #0f172a; font-size: 0.85rem; "
                         + "white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
@@ -6507,9 +7351,10 @@ def _build_cached_autocomplete_html() -> str:
                         "font-size: 0.72rem; color: #64748b; white-space: nowrap; "
                         + "overflow: hidden; text-overflow: ellipsis;"
                     );
+                    const iconSvg = resolveAutocompleteIcon(item.icon);
                     html += `
                         <div class="safecycle-dropdown-item" data-val="${{item.name}}">
-                            <span style="font-size: 1.25rem;">${{item.icon || "📍"}}</span>
+                            <span style="color:#047857;display:inline-flex;">${{iconSvg}}</span>
                             <div style="flex: 1; min-width: 0;">
                                 <div style="${{tStyle}}">${{titleDisp}}</div>
                                 <div style="${{sStyle}}">${{item.desc || item.city || ""}}</div>
@@ -6681,35 +7526,30 @@ def render_leaflet_planner_map(
     dest_label: str,
     height_px: int = 380
 ) -> str:
-    """Build interactive Leaflet map for route planner showing start/dest locations.
-
-    Advanced technique: Embeds client-side JavaScript and Leaflet.js tile layers
-    via Drafter RawHTML (using escaped braces inside Python f-strings) plus
-    localStorage state persistence for Streets vs. Satellite basemap toggling.
-    Cannot be unit-tested at runtime without a live browser DOM; verified by
-    checking rendered HTML output strings.
-    """
+    """Build interactive Leaflet map for route planner showing start/dest locations."""
     s_open = "<scr" + "ipt>"
     s_close = "</scr" + "ipt>"
     clean_s = start_label.replace('"', '\\"').replace("'", "\\'")
     clean_d = dest_label.replace('"', '\\"').replace("'", "\\'")
+    streets_ico = sc_icon("map", 13)
+    sat_ico = sc_icon("globe", 13)
 
     return f"""
-    <div id="safecycle_planner_map_wrapper" style="position: relative; width: 100%; border-radius: 12px;
-        overflow: hidden; border: 1.5px solid #cbd5e1; box-shadow: 0 4px 14px rgba(0,0,0,0.08);
-        margin: 6px 0 2px 0;">
+    <div id="safecycle_planner_map_wrapper" style="position: relative; width: 100%; border-radius: 10px;
+        overflow: hidden; border: 1px solid #cbd5e1; box-shadow: 0 2px 10px rgba(15,23,42,0.06);
+        margin: 4px 0 0 0;">
         <div id="safecycle_planner_map"
-            style="height: {height_px}px; width: 100%; background: #e2e8f0; z-index: 1;"></div>
+            style="height: {height_px}px; width: 100%; background: #e2e8f0; z-index: 1;">
+        </div>
 
-        <!-- Satellite / Street Map Layer Toggle -->
         <div class="safecycle-map-type-bar">
             <button type="button" id="planner_btn_streets" class="safecycle-layer-btn is-active"
                 onclick="window.safecycleTogglePlannerLayer('streets')">
-                🗺️ Streets
+                {streets_ico} Streets
             </button>
             <button type="button" id="planner_btn_satellite" class="safecycle-layer-btn is-inactive"
                 onclick="window.safecycleTogglePlannerLayer('satellite')">
-                🛰️ Satellite
+                {sat_ico} Satellite
             </button>
         </div>
     </div>
@@ -6724,19 +7564,18 @@ def render_leaflet_planner_map(
                 zoomControl: true
             }});
 
-            // Street tile layer
-            const streetLayer = L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
+            const hotUrl = "https://{{s}}.tile.openstreetmap.fr/hot/{{z}}/{{x}}/{{y}}.png";
+            const streetLayer = L.tileLayer(hotUrl, {{
                 maxZoom: 19,
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                attribution: '&copy; OpenStreetMap contributors'
             }});
 
-            // Satellite tile layer (Esri World Imagery) + Hybrid Labels and Roads
             const esriBase = "https://server.arcgisonline.com/ArcGIS/rest/services";
             const satBaseLayer = L.tileLayer(
                 esriBase + "/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}",
                 {{
                     maxZoom: 19,
-                    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics'
+                    attribution: 'Tiles &copy; Esri'
                 }}
             );
 
@@ -6787,10 +7626,10 @@ def render_leaflet_planner_map(
             applyMapLayer(initialMode);
 
             const startPinHtml = (
-                '<div style="background: #ffffff; border: 3px solid #1e293b; border-radius: 50%; '
+                '<div style="background: #ffffff; border: 3px solid #047857; border-radius: 50%; '
                 + 'width: 22px; height: 22px; display: flex; align-items: center; '
-                + 'justify-content: center; box-shadow: 0 3px 8px rgba(0,0,0,0.35);">'
-                + '<div style="width: 7px; height: 7px; border-radius: 50%; background: #2563eb;">'
+                + 'justify-content: center; box-shadow: 0 3px 8px rgba(0,0,0,0.3);">'
+                + '<div style="width: 7px; height: 7px; border-radius: 50%; background: #047857;">'
                 + '</div></div>'
             );
             const startIcon = L.divIcon({{
@@ -6820,22 +7659,21 @@ def render_leaflet_planner_map(
             const lat2 = {dest_coord.latitude};
             const lon2 = {dest_coord.longitude};
 
-            L.marker([lat1, lon1], {{ icon: startIcon }}).addTo(map).bindPopup("<b>🚴 Start:</b><br>{clean_s}");
-            L.marker([lat2, lon2], {{ icon: destIcon }}).addTo(map).bindPopup("<b>🎯 Destination:</b><br>{clean_d}");
+            L.marker([lat1, lon1], {{ icon: startIcon }}).addTo(map).bindPopup("<b>Start:</b><br>{clean_s}");
+            L.marker([lat2, lon2], {{ icon: destIcon }}).addTo(map).bindPopup("<b>Destination:</b><br>{clean_d}");
 
-            // Preview connecting line
             L.polyline([[lat1, lon1], [lat2, lon2]], {{
                 color: "#059669",
                 weight: 4,
                 dashArray: "6, 8",
-                opacity: 0.75
+                opacity: 0.78
             }}).addTo(map);
 
             const bounds = L.latLngBounds([[lat1, lon1], [lat2, lon2]]);
             map.fitBounds(bounds, {{ padding: [45, 45], maxZoom: 15 }});
 
-            setTimeout(() => map.invalidateSize(), 200);
-            setTimeout(() => map.invalidateSize(), 600);
+            setTimeout(() => map.invalidateSize(), 250);
+            setTimeout(() => map.invalidateSize(), 700);
         }}
 
         if (document.readyState === "loading") {{
@@ -6856,15 +7694,9 @@ def render_leaflet_route_map(
     dest_label: str,
     start_coord: Coordinate,
     dest_coord: Coordinate,
-    height_px: int = 480
+    height_px: int = 470
 ) -> str:
-    """Build Google Maps-style interactive bicycle route comparison map.
-
-    Advanced technique: Serializes Python RouteOption coordinates into JSON via
-    json.dumps and injects Leaflet.js polyline layers, custom SVG markers, and
-    click handlers through Drafter RawHTML. Browser DOM execution cannot run in
-    Python unittest directly; tested via serialized route payload checks.
-    """
+    """Build interactive bicycle route comparison map and sync side overview selection."""
     s_open = "<scr" + "ipt>"
     s_close = "</scr" + "ipt>"
 
@@ -6907,35 +7739,40 @@ def render_leaflet_route_map(
     routes_json = json.dumps(routes_data)
     clean_start = start_label.replace('"', '\\"').replace("'", "\\'")
     clean_dest = dest_label.replace('"', '\\"').replace("'", "\\'")
+    streets_ico = sc_icon("map", 13)
+    sat_ico = sc_icon("globe", 13)
+    bike_badge_ico = sc_icon("bike", 13)
 
     return f"""
     <style>
         .safecycle-map-wrap {{
             position: relative;
             width: 100%;
-            border-radius: 14px;
+            border-radius: 10px;
             overflow: hidden;
-            border: 1.5px solid #cbd5e1;
-            box-shadow: 0 6px 20px rgba(15, 23, 42, 0.10);
-            margin: 6px 0 4px 0;
+            border: 1px solid #cbd5e1;
+            box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+            margin: 0;
             background: #f8fafc;
         }}
         .safecycle-floating-legend {{
             position: absolute;
-            bottom: 14px;
-            right: 14px;
+            bottom: 24px;
+            right: 10px;
+            max-width: calc(100% - 20px);
             z-index: 1000;
-            background: rgba(255, 255, 255, 0.95);
+            background: rgba(255, 255, 255, 0.94);
             backdrop-filter: blur(8px);
-            padding: 8px 12px;
+            padding: 6px 10px;
             border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            font-size: 0.75rem;
+            box-shadow: 0 4px 12px rgba(15,23,42,0.14);
+            font-size: 0.72rem;
             color: #475569;
             border: 1px solid #e2e8f0;
             display: flex;
             align-items: center;
-            gap: 12px;
+            flex-wrap: wrap;
+            gap: 8px;
         }}
         .badge-callout-wrap {{
             position: relative;
@@ -6944,7 +7781,7 @@ def render_leaflet_route_map(
             align-items: center;
             cursor: pointer;
             user-select: none;
-            transition: transform 0.15s ease, filter 0.15s ease;
+            transition: transform 0.14s ease, filter 0.14s ease;
         }}
         .badge-callout-wrap:hover {{
             transform: scale(1.06);
@@ -6954,37 +7791,37 @@ def render_leaflet_route_map(
             border-radius: 8px;
             padding: 5px 9px;
             text-align: left;
-            min-width: 90px;
+            min-width: 92px;
         }}
         .badge-card.is-active {{
             background: #ffffff;
-            border: 2px solid #1d4ed8;
+            border: 2px solid #047857;
             color: #0f172a;
-            box-shadow: 0 4px 16px rgba(29, 78, 216, 0.35), 0 2px 6px rgba(0,0,0,0.12);
+            box-shadow: 0 4px 14px rgba(4, 120, 87, 0.30), 0 2px 6px rgba(0,0,0,0.12);
         }}
         .badge-card.is-alt {{
             background: rgba(255, 255, 255, 0.94);
             border: 1.5px solid #cbd5e1;
             color: #334155;
-            box-shadow: 0 3px 10px rgba(0,0,0,0.15);
+            box-shadow: 0 3px 10px rgba(0,0,0,0.14);
         }}
         .badge-time {{
-            font-size: 13px;
-            font-weight: 800;
+            font-size: 12.5px;
+            font-weight: 700;
             display: flex;
             align-items: center;
             gap: 4px;
             line-height: 1.2;
         }}
         .badge-dist {{
-            font-size: 11px;
+            font-size: 10.5px;
             font-weight: 600;
             color: #64748b;
             margin-top: 1px;
             line-height: 1.1;
         }}
         .is-active .badge-dist {{
-            color: #1d4ed8;
+            color: #047857;
             font-weight: 700;
         }}
         .badge-arrow-down {{
@@ -6995,7 +7832,7 @@ def render_leaflet_route_map(
             margin-top: -1px;
         }}
         .badge-arrow-down.is-active {{
-            border-top: 7px solid #1d4ed8;
+            border-top: 7px solid #047857;
         }}
         .badge-arrow-down.is-alt {{
             border-top: 6px solid #cbd5e1;
@@ -7008,37 +7845,36 @@ def render_leaflet_route_map(
     </style>
 
     <div class="safecycle-map-wrap" id="safecycle_leaflet_route_wrapper">
-        <div id="safecycle_route_map" style="height: {height_px}px; width: 100%; z-index: 1;"></div>
+        <div id="safecycle_route_map"
+            style="height: {height_px}px; width: 100%; z-index: 1;"></div>
 
-        <!-- Satellite / Street Map Layer Toggle -->
         <div class="safecycle-map-type-bar">
             <button type="button" id="route_btn_streets" class="safecycle-layer-btn is-active"
                 onclick="window.safecycleToggleRouteLayer('streets')">
-                🗺️ Streets
+                {streets_ico} Streets
             </button>
             <button type="button" id="route_btn_satellite" class="safecycle-layer-btn is-inactive"
                 onclick="window.safecycleToggleRouteLayer('satellite')">
-                🛰️ Satellite
+                {sat_ico} Satellite
             </button>
         </div>
 
-        <!-- Google Maps Style Map Legend & Action Hint -->
         <div class="safecycle-floating-legend">
-            <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="display: inline-block; width: 18px; height: 6px;
-                    background: #1d4ed8; border-radius: 3px;"></span>
-                <span style="font-weight: 700; color: #1e3a8a;">Selected Route</span>
+            <div style="display: flex; align-items: center; gap: 5px;">
+                <span style="display: inline-block; width: 16px; height: 5px;
+                    background: #047857; border-radius: 3px;"></span>
+                <span style="font-weight: 700; color: #064e3b;">Selected Route</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="display: inline-block; width: 18px; height: 4px;
-                    background: #60a5fa; border-radius: 2px;"></span>
-                <span style="color: #64748b;">Recommended</span>
+            <div style="display: flex; align-items: center; gap: 5px;">
+                <span style="display: inline-block; width: 16px; height: 4px;
+                    background: #3b82f6; border-radius: 2px;"></span>
+                <span style="color: #64748b;">Alternative</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="display: inline-block; width: 18px; height: 3px; border-top: 3px dashed #818cf8;"></span>
-                <span style="color: #6366f1; font-weight: 600;">Possible Corridors</span>
+            <div style="display: flex; align-items: center; gap: 5px;">
+                <span style="display: inline-block; width: 16px; height: 3px; border-top: 3px dashed #818cf8;"></span>
+                <span style="color: #6366f1; font-weight: 600;">Corridor</span>
             </div>
-            <span style="color: #0284c7; font-weight: 600;">• Click route or badge to select</span>
+            <span style="color: #047857; font-weight: 600;">Click route to inspect</span>
         </div>
     </div>
 
@@ -7049,6 +7885,7 @@ def render_leaflet_route_map(
             if (!mapEl || mapEl._leaflet_id) return;
 
             const routesData = {routes_json};
+            const bikeIcoSvg = {json.dumps(bike_badge_ico)};
             let currentActive = "{active_type}";
             const startLat = {start_coord.latitude};
             const startLon = {start_coord.longitude};
@@ -7062,19 +7899,18 @@ def render_leaflet_route_map(
                 zoomControl: true
             }});
 
-            // High-contrast clean OpenStreetMap tiles
-            const streetLayer = L.tileLayer("https://{{s}}.tile.openstreetmap.fr/hot/{{z}}/{{x}}/{{y}}.png", {{
+            const hotUrl = "https://{{s}}.tile.openstreetmap.fr/hot/{{z}}/{{x}}/{{y}}.png";
+            const streetLayer = L.tileLayer(hotUrl, {{
                 maxZoom: 19,
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                attribution: '&copy; OpenStreetMap contributors'
             }});
 
-            // Satellite tile layer (Esri World Imagery) + Hybrid Labels and Roads
             const esriBase = "https://server.arcgisonline.com/ArcGIS/rest/services";
             const satBaseLayer = L.tileLayer(
                 esriBase + "/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}",
                 {{
                     maxZoom: 19,
-                    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics'
+                    attribution: 'Tiles &copy; Esri'
                 }}
             );
 
@@ -7126,12 +7962,11 @@ def render_leaflet_route_map(
             }} catch(e) {{}}
             applyMapLayer(initialMode);
 
-            // Google Maps Style Start Marker (Clean Ring Icon)
             const startPinHtml = (
-                '<div style="background: #ffffff; border: 3px solid #1e293b; border-radius: 50%; '
+                '<div style="background: #ffffff; border: 3px solid #047857; border-radius: 50%; '
                 + 'width: 22px; height: 22px; display: flex; align-items: center; '
-                + 'justify-content: center; box-shadow: 0 3px 8px rgba(0,0,0,0.35);">'
-                + '<div style="width: 7px; height: 7px; border-radius: 50%; background: #2563eb;">'
+                + 'justify-content: center; box-shadow: 0 3px 8px rgba(0,0,0,0.3);">'
+                + '<div style="width: 7px; height: 7px; border-radius: 50%; background: #047857;">'
                 + '</div></div>'
             );
             const startIcon = L.divIcon({{
@@ -7141,7 +7976,6 @@ def render_leaflet_route_map(
                 iconAnchor: [11, 11]
             }});
 
-            // Google Maps Style Classic Red Teardrop Destination Pin
             const destPinHtml = (
                 '<div style="filter: drop-shadow(0 3px 6px rgba(0,0,0,0.35)); '
                 + 'margin-left: -13px; margin-top: -34px;">'
@@ -7158,17 +7992,15 @@ def render_leaflet_route_map(
             }});
 
             L.marker([startLat, startLon], {{ icon: startIcon }})
-                .addTo(map).bindPopup("<b>🚴 Start:</b><br>" + startName);
+                .addTo(map).bindPopup("<b>Start:</b><br>" + startName);
             L.marker([destLat, destLon], {{ icon: destIcon }})
-                .addTo(map).bindPopup("<b>🎯 Destination:</b><br>" + destName);
+                .addTo(map).bindPopup("<b>Destination:</b><br>" + destName);
 
-            // Container collections for interactive updates
             const routeLayers = {{}};
             const badgeMarkers = {{}};
             const turnMarkerLayers = [];
             const allPoints = [];
 
-            // Global selection function for badges, lines, cards, and buttons (instant client-side, NO RELOAD)
             window.safecycleSelectRoute = function(selectedType) {{
                 if (!selectedType || !routesData[selectedType]) return;
                 currentActive = selectedType;
@@ -7178,14 +8010,16 @@ def render_leaflet_route_map(
             function createBadgeIcon(rType, rInfo, isActive) {{
                 const cardClass = isActive ? "badge-card is-active" : "badge-card is-alt";
                 const arrowClass = isActive ? "badge-arrow-down is-active" : "badge-arrow-down is-alt";
+                const colorSpan = isActive ? "#047857" : "#475569";
                 const html = `
                     <div class="badge-callout-wrap" onclick="window.safecycleSelectRoute('${{rType}}')">
                         <div class="${{cardClass}}">
                             <div class="badge-time">
-                                <span>🚲</span> <span>${{rInfo.duration_formatted}}</span>
+                                <span style="color:${{colorSpan}};display:inline-flex;">${{bikeIcoSvg}}</span>
+                                <span>${{rInfo.duration_formatted}}</span>
                             </div>
                             <div class="badge-dist">
-                                ${{rInfo.distance_mi_formatted || rInfo.distance_mi}} miles • ${{rType}}
+                                ${{rInfo.distance_mi_formatted || rInfo.distance_mi}} mi &middot; ${{rType}}
                             </div>
                         </div>
                         <div class="${{arrowClass}}"></div>
@@ -7208,7 +8042,6 @@ def render_leaflet_route_map(
             }}
 
             function applyRouteStyles() {{
-                // 1. Update Polylines for ALL available routes
                 Object.keys(routesData).forEach(rType => {{
                     const layers = routeLayers[rType];
                     if (!layers) return;
@@ -7216,20 +8049,19 @@ def render_leaflet_route_map(
                     const isSelected = (rType === currentActive);
                     const isPossible = (rInfo && rInfo.classification === "POSSIBLE");
                     if (isSelected) {{
-                        layers.casing.setStyle({{ color: "#1e3a8a", weight: 11, opacity: 0.45 }});
-                        layers.main.setStyle({{ color: "#1d4ed8", weight: 8, opacity: 1.0, dashArray: null }});
+                        layers.casing.setStyle({{ color: "#064e3b", weight: 11, opacity: 0.38 }});
+                        layers.main.setStyle({{ color: "#047857", weight: 7.5, opacity: 1.0, dashArray: null }});
                         safeToFront(layers.casing);
                         safeToFront(layers.main);
                     }} else if (isPossible) {{
                         layers.casing.setStyle({{ color: "#cbd5e1", weight: 7, opacity: 0.25 }});
                         layers.main.setStyle({{ color: "#818cf8", weight: 5, opacity: 0.80, dashArray: "8, 6" }});
                     }} else {{
-                        layers.casing.setStyle({{ color: "#94a3b8", weight: 8, opacity: 0.20 }});
-                        layers.main.setStyle({{ color: "#60a5fa", weight: 6, opacity: 0.70, dashArray: null }});
+                        layers.casing.setStyle({{ color: "#94a3b8", weight: 8, opacity: 0.22 }});
+                        layers.main.setStyle({{ color: "#3b82f6", weight: 5.5, opacity: 0.68, dashArray: null }});
                     }}
                 }});
 
-                // 2. Clear and Redraw White Turn Waypoint Dots along the active route
                 turnMarkerLayers.forEach(l => map.removeLayer(l));
                 turnMarkerLayers.length = 0;
 
@@ -7243,7 +8075,7 @@ def render_leaflet_route_map(
                         const pt = pts[idx];
                         const dot = L.circleMarker([pt[0], pt[1]], {{
                             radius: 3.5,
-                            color: "#1e40af",
+                            color: "#065f46",
                             fillColor: "#ffffff",
                             fillOpacity: 1.0,
                             weight: 2
@@ -7252,7 +8084,6 @@ def render_leaflet_route_map(
                     }}
                 }}
 
-                // 3. Update Floating Badges (ONLY for Direct, Balanced, and Safest!)
                 ["Direct", "Balanced", "Safest"].forEach(rType => {{
                     const marker = badgeMarkers[rType];
                     const rInfo = routesData[rType];
@@ -7263,82 +8094,59 @@ def render_leaflet_route_map(
                     }}
                 }});
 
-                // 4. Update Deck Header Badge
                 const deckPill = document.getElementById("safecycle_active_deck_pill");
                 if (deckPill) {{
-                    deckPill.innerText = "Active on Map: " + currentActive + " Route";
+                    deckPill.innerText = "Selected: " + currentActive + " Route";
                 }}
 
-                // 5. Update Strava & Possible Route Cards & Buttons
+                document.querySelectorAll(".sc-switch-tab").forEach(tab => {{
+                    const rTarget = tab.getAttribute("data-route-tab");
+                    tab.classList.toggle("is-active", rTarget === currentActive);
+                }});
+
+                const safeActiveId = currentActive.replace(/[^a-zA-Z0-9_]/g, "_");
+                document.querySelectorAll(".sc-overview-slot").forEach(slot => {{
+                    slot.style.display = "none";
+                }});
+                const activeSlot = document.getElementById("route_overview_slot_" + safeActiveId);
+                if (activeSlot) {{
+                    activeSlot.style.display = "flex";
+                }}
+
                 const isDarkMode = document.documentElement.classList.contains("safecycle-dark");
                 Object.keys(routesData).forEach(rType => {{
                     const safeId = rType.replace(/[^a-zA-Z0-9_]/g, "_");
                     const card = document.getElementById("strava_card_" + safeId);
                     const pill = document.getElementById("strava_card_pill_" + safeId);
-                    const btn = document.getElementById("strava_card_btn_" + safeId);
                     const isAct = (rType === currentActive);
                     const rInfo = routesData[rType];
                     const isPoss = (rInfo && rInfo.classification === "POSSIBLE");
 
                     if (card) {{
-                        if (isAct) {{
-                            card.classList.add("active");
-                            card.style.borderColor = isPoss ? "#6366f1" : "#FC5200";
-                            card.style.boxShadow = isPoss
-                                ? "0 8px 24px rgba(99, 102, 241, 0.22)"
-                                : "0 8px 24px rgba(252, 82, 0, 0.15)";
-                        }} else {{
-                            card.classList.remove("active");
-                            card.style.borderColor = isDarkMode
-                                ? "#334155"
-                                : (isPoss ? "#cbd5e1" : "#e2e8f0");
-                            card.style.boxShadow = "0 2px 6px rgba(0,0,0,0.04)";
+                        card.classList.toggle("active", isAct);
+                        if (isPoss) {{
+                            card.style.borderColor = isAct
+                                ? "#6366f1"
+                                : (isDarkMode ? "#334155" : "#cbd5e1");
                         }}
                     }}
                     if (pill) {{
-                        if (isAct) {{
-                            pill.className = "strava-pill-active";
-                            pill.innerText = isPoss ? "✓ ACTIVE ON MAP" : "✓ ACTIVE ROUTE";
-                            if (isPoss) pill.style.background = "#4338ca";
-                        }} else {{
-                            pill.className = "strava-pill-alt";
-                            pill.innerText = isPoss ? "POSSIBLE OPTION" : "ALTERNATIVE";
-                            if (isPoss) pill.style.background = isDarkMode ? "#1e293b" : "#f1f5f9";
-                        }}
-                    }}
-                    if (btn) {{
-                        if (isAct) {{
-                            btn.style.background = isPoss ? "#4338ca" : "#FC5200";
-                            btn.style.color = "#ffffff";
-                            btn.style.border = "none";
-                            btn.innerText = isPoss
-                                ? "✓ Active on Map (Viewing Details)"
-                                : "✓ Active Route (Selected on Map)";
-                        }} else {{
-                            btn.style.background = isDarkMode ? "#1e293b" : "#ffffff";
-                            btn.style.color = isDarkMode
-                                ? (isPoss ? "#c4b5fd" : "#f1f5f9")
-                                : (isPoss ? "#4338ca" : "#1e293b");
-                            btn.style.border = isDarkMode
-                                ? "1.5px solid #475569"
-                                : (isPoss ? "1.5px solid #c7d2fe" : "2px solid #cbd5e1");
-                            btn.innerText = isPoss ? "View Details & Select Route ➔" : ("Select " + rType + " Route ➔");
+                        pill.className = isAct ? "strava-pill-active" : "strava-pill-alt";
+                        if (isPoss) {{
+                            pill.innerText = isAct ? "SELECTED" : "POSSIBLE";
                         }}
                     }}
                 }});
 
-                // 6. Toggle Route Mode Overview Sections
                 document.querySelectorAll(".route-mode-section").forEach(sec => {{
                     sec.style.display = "none";
                 }});
-                const safeActiveId = currentActive.replace(/[^a-zA-Z0-9_]/g, "_");
                 const activeSec = document.getElementById("route_section_" + safeActiveId);
                 if (activeSec) {{
                     activeSec.style.display = "block";
                 }}
             }}
 
-            // Setup Routes and Layers
             const allRouteKeys = Object.keys(routesData);
             allRouteKeys.forEach(rType => {{
                 const rInfo = routesData[rType];
@@ -7348,15 +8156,14 @@ def render_leaflet_route_map(
                 latlngs.forEach(pt => allPoints.push(pt));
 
                 const isPoss = (rInfo.classification === "POSSIBLE");
-                const initialMainColor = isPoss ? "#818cf8" : "#60a5fa";
-                const initialMainWeight = isPoss ? 5 : 6;
+                const initialMainColor = isPoss ? "#818cf8" : "#3b82f6";
+                const initialMainWeight = isPoss ? 5 : 5.5;
                 const initialDash = isPoss ? "8, 6" : null;
 
-                // Route Polylines: Casing (halo) + Main line
                 const casing = L.polyline(latlngs, {{
                     color: isPoss ? "#cbd5e1" : "#94a3b8",
                     weight: isPoss ? 7 : 8,
-                    opacity: isPoss ? 0.25 : 0.20,
+                    opacity: isPoss ? 0.25 : 0.22,
                     lineCap: "round",
                     lineJoin: "round"
                 }}).addTo(map);
@@ -7364,36 +8171,33 @@ def render_leaflet_route_map(
                 const main = L.polyline(latlngs, {{
                     color: initialMainColor,
                     weight: initialMainWeight,
-                    opacity: isPoss ? 0.80 : 0.70,
+                    opacity: isPoss ? 0.80 : 0.68,
                     dashArray: initialDash,
                     lineCap: "round",
                     lineJoin: "round"
                 }}).addTo(map);
 
-                // Click or hover on route lines (any route can be clicked to select)
                 const handleRouteClick = () => window.safecycleSelectRoute(rType);
                 casing.on("click", handleRouteClick);
                 main.on("click", handleRouteClick);
 
-                // Informative hover tooltip on the route line
                 const tooltipBadge = isPoss
-                    ? '<br><span style="color:#6366f1;font-weight:700;">'
-                      + '🧭 Possible Corridor (Unselected)</span>'
+                    ? '<br><span style="color:#4338ca;font-weight:700;">Possible Corridor</span>'
                     : '';
                 const tooltipHtml = (
-                    `<b>${{rType}}</b>: ${{rInfo.distance_mi_formatted || rInfo.distance_mi}} mi • `
+                    `<b>${{rType}}</b>: ${{rInfo.distance_mi_formatted || rInfo.distance_mi}} mi &middot; `
                     + `${{rInfo.duration_formatted}}${{tooltipBadge}}<br>`
-                    + '<span style="color:#2563eb;font-weight:600;">Click route to select</span>'
+                    + '<span style="color:#047857;font-weight:600;">Click to inspect route</span>'
                 );
                 main.bindTooltip(tooltipHtml, {{
                     sticky: true,
                     direction: "top",
-                    opacity: 0.95
+                    opacity: 0.96
                 }});
 
                 main.on("mouseover", function() {{
                     if (rType !== currentActive) {{
-                        main.setStyle({{ color: isPoss ? "#6366f1" : "#2563eb", weight: 7.5, opacity: 0.95 }});
+                        main.setStyle({{ color: isPoss ? "#6366f1" : "#2563eb", weight: 7, opacity: 0.95 }});
                     }}
                 }});
                 main.on("mouseout", function() {{
@@ -7401,14 +8205,13 @@ def render_leaflet_route_map(
                         if (isPoss) {{
                             main.setStyle({{ color: "#818cf8", weight: 5, opacity: 0.80, dashArray: "8, 6" }});
                         }} else {{
-                            main.setStyle({{ color: "#60a5fa", weight: 6, opacity: 0.70, dashArray: null }});
+                            main.setStyle({{ color: "#3b82f6", weight: 5.5, opacity: 0.68, dashArray: null }});
                         }}
                     }}
                 }});
 
                 routeLayers[rType] = {{ casing, main }};
 
-                // User constraint: ONLY show floating callout badges for Direct, Balanced, and Safest!
                 if (["Direct", "Balanced", "Safest"].includes(rType)) {{
                     const offsetFraction = (rType === "Direct") ? 0.22 : ((rType === "Balanced") ? 0.52 : 0.82);
                     const anchorIdx = Math.floor((latlngs.length - 1) * offsetFraction);
@@ -7424,38 +8227,33 @@ def render_leaflet_route_map(
                 }}
             }});
 
-            // Initial styling pass
             applyRouteStyles();
 
-            function resizeAndFit() {{
+            let lastMapW = 0;
+            let lastMapH = 0;
+            function resizeAndFit(forceFit) {{
                 try {{
+                    const w = mapEl.clientWidth || 0;
+                    const h = mapEl.clientHeight || 0;
+                    if (!forceFit && Math.abs(w - lastMapW) < 4 && Math.abs(h - lastMapH) < 4) {{
+                        return;
+                    }}
+                    lastMapW = w;
+                    lastMapH = h;
                     map.invalidateSize();
                     if (allPoints.length > 0) {{
                         const bounds = L.latLngBounds(allPoints);
-                        map.fitBounds(bounds, {{ padding: [60, 60], maxZoom: 16 }});
+                        map.fitBounds(bounds, {{ padding: [55, 55], maxZoom: 16 }});
                     }} else {{
                         map.setView([startLat, startLon], 13);
                     }}
                 }} catch (e) {{}}
             }}
 
-            resizeAndFit();
-            setTimeout(resizeAndFit, 100);
-            setTimeout(resizeAndFit, 350);
-            setTimeout(resizeAndFit, 800);
-            setTimeout(resizeAndFit, 1800);
-
-            if (window.IntersectionObserver) {{
-                const observer = new IntersectionObserver((entries) => {{
-                    entries.forEach(entry => {{
-                        if (entry.isIntersecting) {{
-                            resizeAndFit();
-                        }}
-                    }});
-                }}, {{ threshold: 0.1 }});
-                observer.observe(mapEl);
-            }}
-            window.addEventListener("resize", resizeAndFit);
+            resizeAndFit(true);
+            setTimeout(() => resizeAndFit(true), 250);
+            setTimeout(() => resizeAndFit(false), 750);
+            window.addEventListener("resize", () => resizeAndFit(false));
         }}
 
         if (document.readyState === "loading") {{
@@ -7469,18 +8267,20 @@ def render_leaflet_route_map(
     {s_close}
     """
 
+
 # --- Page 1: Home / Route Planner ---
 @route
 def index(state: State) -> Page:
-    """Route Planner homepage: Search inputs with autocomplete dropdowns, preferences, benchmark corridors, map."""
+    """Route Planner homepage: Streamlined two-column trip form and route preview map."""
     state.current_page = "planner"
-    
+
     notification_block = []
     if state.notification:
-        notification_block.append(RawHTML(f'<div class="notification-banner">ℹ️ {state.notification}</div>'))
+        notification_block.append(
+            RawHTML(f'<div class="notification-banner">{sc_icon("info", 16)} {state.notification}</div>')
+        )
         state.notification = ""
 
-    # Leaflet Interactive Map showing start/dest and corridor
     start_coord, s_name = geocode_address(state.start_address)
     dest_coord, d_name = geocode_address(state.dest_address)
     if not start_coord:
@@ -7490,7 +8290,7 @@ def index(state: State) -> Page:
         dest_coord = Coordinate(40.7126, -74.0048)
         d_name = state.dest_address or "Brooklyn Bridge (Manhattan Side), NY"
 
-    planner_map_html = render_leaflet_planner_map(start_coord, dest_coord, s_name, d_name, height_px=360)
+    planner_map_html = render_leaflet_planner_map(start_coord, dest_coord, s_name, d_name, height_px=390)
 
     legend_html = """
     <div class="legend-bar">
@@ -7507,154 +8307,159 @@ def index(state: State) -> Page:
     """
 
     beta_popular_corridors_block = Div([
-        Header(
-            "🧪 Beta Mode: Popular Benchmark Corridors & Quick Select",
-            level=3,
-            style="color: #064e3b; margin-top: 0;",
-        ),
-        Paragraph(
-            "Explore curated Vision Zero & OpenStreetMap cycling corridors across major hubs:",
-            style="font-size: 0.85rem; color: #475569; margin-bottom: 8px;",
+        RawHTML(
+            f'<h3 style="display:flex;align-items:center;gap:8px;color:#064e3b;margin:0 0 8px 0;">'
+            f'{sc_icon("flask", 17)} Beta Benchmark Corridors &amp; Quick Select</h3>'
         ),
         Row([
-            Button("🚲 Newark to Kirkwood (DE)", pick_preset_newark),
-            Button("🗽 Central Park to Brooklyn Bridge (NYC)", pick_preset_nyc),
-            Button("🌉 Market St to Panhandle (SF)", pick_preset_sf),
-            Button("🌊 Hudson River Greenway (NYC)", pick_preset_greenway),
-            Button("🌲 Seattle Burke-Gilman (WA)", pick_preset_seattle),
-            Button("🌉 Portland Tilikum Crossing (OR)", pick_preset_portland)
+            Button(
+                "Newark to Kirkwood (DE)",
+                pick_preset_newark,
+                classes="sc-btn sc-btn-secondary sc-btn-sm sc-ico-bike",
+            ),
+            Button(
+                "Central Park to Brooklyn Bridge",
+                pick_preset_nyc,
+                classes="sc-btn sc-btn-secondary sc-btn-sm sc-ico-map",
+            ),
+            Button(
+                "Market St to Panhandle (SF)",
+                pick_preset_sf,
+                classes="sc-btn sc-btn-secondary sc-btn-sm sc-ico-map",
+            ),
+            Button(
+                "Hudson River Greenway",
+                pick_preset_greenway,
+                classes="sc-btn sc-btn-secondary sc-btn-sm sc-ico-bike",
+            ),
+            Button(
+                "Seattle Burke-Gilman",
+                pick_preset_seattle,
+                classes="sc-btn sc-btn-secondary sc-btn-sm sc-ico-bike",
+            ),
+            Button(
+                "Portland Tilikum Crossing",
+                pick_preset_portland,
+                classes="sc-btn sc-btn-secondary sc-btn-sm sc-ico-map",
+            ),
         ], style="gap: 8px; flex-wrap: wrap; margin-bottom: 12px;"),
         RawHTML("""
         <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 260px;">
-                <small style="font-weight: 600; color: #475569;">📍 Popular Start Locations (Beta):</small>
+            <div style="flex: 1; min-width: 240px;">
+                <small style="font-weight: 600; color: #475569;">Popular Start Locations</small>
                 <select id="start_quick_select" class="safecycle-quick-select"
                     aria-label="Quick Select Start Address" style="margin-top: 4px;">
                     <option value="">Choose a popular start location...</option>
-                    <option value="Louis Redding Hall, Newark, DE">🚲 Louis Redding Hall, Newark, DE</option>
-                    <option value="Central Park South, New York, NY">🌳 Central Park South, NY</option>
-                    <option value="Hudson River Greenway at 72nd St, NY">🚲 Hudson River Greenway (72nd St), NY</option>
-                    <option value="Market St at 4th St, San Francisco, CA">🏙️ Market St at 4th St, SF</option>
-                    <option value="Seattle Waterfront / Pike Place, WA">🏙️ Seattle Waterfront, WA</option>
-                    <option value="Portland Waterfront Park, OR">🚲 Portland Waterfront Park, OR</option>
+                    <option value="Louis Redding Hall, Newark, DE">Louis Redding Hall, Newark, DE</option>
+                    <option value="Central Park South, New York, NY">Central Park South, NY</option>
+                    <option value="Hudson River Greenway at 72nd St, NY">Hudson River Greenway (72nd St), NY</option>
+                    <option value="Market St at 4th St, San Francisco, CA">Market St at 4th St, SF</option>
+                    <option value="Seattle Waterfront / Pike Place, WA">Seattle Waterfront, WA</option>
+                    <option value="Portland Waterfront Park, OR">Portland Waterfront Park, OR</option>
                 </select>
             </div>
-            <div style="flex: 1; min-width: 260px;">
-                <small style="font-weight: 600; color: #475569;">🎯 Popular Destinations (Beta):</small>
+            <div style="flex: 1; min-width: 240px;">
+                <small style="font-weight: 600; color: #475569;">Popular Destinations</small>
                 <select id="dest_quick_select" class="safecycle-quick-select"
                     aria-label="Quick Select Destination Address" style="margin-top: 4px;">
                     <option value="">Choose a popular destination...</option>
-                    <option value="Kirkwood, DE">🚲 Kirkwood, DE</option>
-                    <option value="Brooklyn Bridge (Manhattan Side), NY">🌉 Brooklyn Bridge, NY</option>
+                    <option value="Kirkwood, DE">Kirkwood, DE</option>
+                    <option value="Brooklyn Bridge (Manhattan Side), NY">Brooklyn Bridge, NY</option>
                     <option value="Golden Gate Park Panhandle, San Francisco, CA">
-                        🚲 Golden Gate Park Panhandle, SF
-                    </option>
-                    <option value="Hudson River Greenway at Battery Park, NY">🚲 Battery Park Greenway, NY</option>
-                    <option value="Tilikum Crossing (Bridge of the People), Portland, OR">
-                        🌉 Tilikum Crossing, OR
-                    </option>
+                        Golden Gate Park Panhandle, SF</option>
+                    <option value="Hudson River Greenway at Battery Park, NY">Battery Park Greenway, NY</option>
+                    <option value="Tilikum Crossing (Bridge of the People), Portland, OR">Tilikum Crossing, OR</option>
                 </select>
             </div>
         </div>
-        """)
-    ], classes="card", style="border-left: 4px solid #059669; background: #f0fdf4; margin-bottom: 16px;")
+        """),
+    ], classes="card", style="border-left: 4px solid #047857; margin-bottom: 16px;")
 
     cur_spd = parse_speed_mph(getattr(state, "planned_speed_mph", getattr(state, "planned_speed", 12.0)))
     cur_spd_str = str(int(cur_spd) if cur_spd.is_integer() else cur_spd)
     cur_dep = getattr(state, "departure_time", "08:30 AM")
     cur_hhmm, cur_ampm = split_time_and_ampm(cur_dep)
 
-    return Page(state, [
-        render_navbar("planner", state.beta_mode, state),
-        *notification_block,
-        *([beta_popular_corridors_block] if state.beta_mode else []),
+    planner_form_card = Div([
         Div([
-            Header("Plan a Safer Bicycle Route", level=2, style="color: #064e3b; margin-top: 0;"),
-            Paragraph(
-                "SafeCycle routes prioritize physical protection, low-speed roads, and verified "
-                "safety records over raw motor vehicle speed. Type your addresses, start time, "
-                "and planned cycling speed below.",
-                style="color: #475569; font-size: 0.9rem; margin-bottom: 16px;"
+            RawHTML(
+                f'<h2 class="sc-planner-heading">'
+                f'{sc_icon("bike", 20)} Plan a Safer Bicycle Route</h2>'
             ),
+            Div([
+                Label("Start Location:", "start_address"),
+                TextBox("start_address", state.start_address),
+            ], style="margin-bottom: 14px;"),
+            Div([
+                Label("Destination Location:", "dest_address"),
+                TextBox("dest_address", state.dest_address),
+            ], style="margin-bottom: 14px;"),
             Row([
                 Div([
-                    Label("Start Location:", "start_address"),
-                    TextBox("start_address", state.start_address),
-                    Paragraph(
-                        "Street address, trail trailhead, campus building, or city intersection.",
-                        style="font-size: 0.75rem; color: #64748b; margin-top: 4px; margin-bottom: 0;",
-                    )
-                ], style="flex: 1; min-width: 280px;"),
-                Div([
-                    Label("Destination Location:", "dest_address"),
-                    TextBox("dest_address", state.dest_address),
-                    Paragraph(
-                        "Destination address, park, landmark, or town center.",
-                        style="font-size: 0.75rem; color: #64748b; margin-top: 4px; margin-bottom: 0;",
-                    )
-                ], style="flex: 1; min-width: 280px;")
-            ], style="gap: 16px; margin-bottom: 14px;"),
-            Row([
-                Div([
-                    Label("Default Route Preference:", "preferred_mode"),
+                    Label("Route Preference:", "preferred_mode"),
                     SelectBox("preferred_mode", ["Safest", "Balanced", "Direct"], state.preferred_mode),
-                ], style="flex: 1; min-width: 160px;"),
+                ]),
                 Div([
-                    Label("Max Acceptable Risk:", "max_risk_tolerance"),
+                    Label("Max Risk Level:", "max_risk_tolerance"),
                     SelectBox("max_risk_tolerance", ["low", "moderate", "any"], state.max_risk_tolerance),
-                ], style="flex: 1; min-width: 160px;"),
+                ]),
                 Div([
                     Label("Detour Tolerance:", "detour_tolerance"),
                     SelectBox("detour_tolerance", ["15%", "35%", "50%", "100%"], state.detour_tolerance),
-                ], style="flex: 1; min-width: 160px;")
-            ], style="gap: 16px; margin-bottom: 14px;"),
+                ]),
+            ], classes="sc-form-row-3"),
             Row([
                 Div([
                     Label("Start Time:", "time_hhmm"),
                     Row([
                         TextBox("time_hhmm", cur_hhmm),
-                        SelectBox("time_ampm", ["AM", "PM"], cur_ampm)
-                    ], style="gap: 8px; align-items: center;"),
-                    Paragraph(
-                        "Auto-formats to 00:00 format. Trip arrival times and traffic levels calculate off this.",
-                        style="font-size: 0.75rem; color: #64748b; margin-top: 4px; margin-bottom: 0;",
-                    )
-                ], style="flex: 1; min-width: 240px;"),
+                        SelectBox("time_ampm", ["AM", "PM"], cur_ampm),
+                    ], classes="sc-time-row"),
+                ]),
                 Div([
                     Label("Planned Speed (mph):", "planned_speed"),
                     TextBox("planned_speed", cur_spd_str),
-                    Paragraph(
-                        "Type cycling pace in mph (e.g., 12.0). Casual ~10, Commute ~12-14, "
-                        "Road ~16-18, E-Bike ~20+.",
-                        style="font-size: 0.75rem; color: #64748b; margin-top: 4px; margin-bottom: 0;",
-                    )
-                ], style="flex: 1; min-width: 240px;")
-            ], style="gap: 16px; margin-bottom: 18px;"),
-            Button(
-                "🚲 Generate & Compare Safe Routes",
-                handle_generate_route,
-                style="background: #FC5200; color: white; padding: 12px 24px; font-size: 1.05rem; "
-                "font-weight: 700; border-radius: 8px; cursor: pointer; border: none; "
-                "box-shadow: 0 4px 12px rgba(252, 82, 0, 0.3);",
-            ),
-        ], classes="card"),
+                ]),
+            ], classes="sc-form-row-2"),
+        ]),
+        Button(
+            "Generate & Compare Safe Routes",
+            handle_generate_route,
+            classes="sc-btn sc-btn-brand sc-btn-full sc-ico-bike",
+        ),
+    ], classes="card")
+
+    planner_map_card = Div([
+        RawHTML(
+            f'<h3 class="sc-planner-heading">'
+            f'{sc_icon("map", 20)} Interactive Route Preview</h3>'
+        ),
+        RawHTML(planner_map_html),
+    ], classes="card")
+
+    return Page(state, [
+        render_navbar("planner", state.beta_mode, state),
+        *notification_block,
+        *([beta_popular_corridors_block] if state.beta_mode else []),
+        Div([
+            planner_form_card,
+            planner_map_card,
+        ], classes="sc-planner-grid"),
         RawHTML(render_autocomplete_html()),
         RawHTML(render_timemask_script_html()),
         RawHTML(legend_html),
         Div([
-            Header("📍 Interactive Bicycle Map", level=3, style="color: #064e3b; margin-top: 0;"),
-            RawHTML(planner_map_html),
-        ], classes="card"),
-        Div([
-            Paragraph(
-                "🛡️ <strong>Safety Principle:</strong> SafeCycle never describes a route as guaranteed safe. "
-                "Our calculations combine OpenStreetMap infrastructure tags, speed limits, traffic volumes, "
-                "and police-reported collision datasets. Always remain alert, follow local traffic laws, "
-                "and exercise caution.",
-                style="font-size: 0.8rem; color: #64748b; margin: 0;",
+            RawHTML(
+                f'<p style="display:flex;align-items:flex-start;gap:8px;font-size:0.8rem;'
+                f'color:#475569;margin:0;line-height:1.45;">'
+                f'<span style="color:#047857;margin-top:2px;">{sc_icon("shield_check", 15)}</span>'
+                '<span><strong>Safety Principle:</strong> SafeCycle combines OpenStreetMap '
+                'infrastructure tags, speed limits, traffic volumes, and historical collision '
+                'datasets to prioritize lower-risk cycling corridors. Always remain alert and '
+                'follow local traffic laws.</span></p>'
             )
-        ], style="background: #f1f5f9; padding: 12px; border-radius: 8px;"),
-        render_beta_corner_toggle(state)
+        ], classes="card", style="padding: 12px 16px; margin-bottom: 12px;"),
+        render_beta_corner_toggle(state),
     ])
 
 # --- Page 2: Route Results Actions ---
@@ -7734,15 +8539,10 @@ def consolidate_route_corridors(segments: List[RoadSegment]) -> List[Dict[str, A
     return corridors
 
 def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mode: bool) -> str:
-    """
-    Render Route Evaluation & Routing Diagnostics strictly when Beta Mode is enabled.
-    Displays multi-criteria candidate scoring, pairwise geometric similarity matrix,
-    ranking rationale, and candidate rejection audit logs.
-    """
+    """Render Route Evaluation & Routing Diagnostics strictly when Beta Mode is enabled."""
     if not beta_mode or not routes:
         return ""
 
-    # 1. Candidate Multi-Criteria Scoring Table
     table_rows = []
     core_order = ["Safest", "Balanced", "Direct"]
     all_keys = (
@@ -7750,7 +8550,6 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
         + [k for k in routes.keys() if k not in core_order]
     )
 
-    # Collect lifecycle summary and all discarded candidates across routes
     lifecycle_summary = None
     all_discarded = []
     for r_type in all_keys:
@@ -7776,12 +8575,13 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
         )
         if is_possible:
             strategy_badge = (
-                '<span style="font-weight: 800; color: #4338ca; background: #f5f3ff; '
-                f'border: 1px solid #ddd6fe; padding: 3px 8px; border-radius: 6px;">🧭 {r_type}</span>'
+                '<span style="font-weight: 700; color: #4338ca; background: #f5f3ff; '
+                'border: 1px solid #ddd6fe; padding: 3px 8px; border-radius: 6px; '
+                f'display:inline-flex;align-items:center;gap:5px;">{sc_icon("compass", 13)} {r_type}</span>'
             )
         else:
             strategy_badge = (
-                '<span style="font-weight: 800; color: #047857; background: #ecfdf5; '
+                '<span style="font-weight: 700; color: #047857; background: #ecfdf5; '
                 f'border: 1px solid #a7f3d0; padding: 3px 8px; border-radius: 6px;">{r_type}</span>'
             )
 
@@ -7791,17 +8591,18 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
         <tr style="border-bottom: 1px solid #e2e8f0; font-size: 0.82rem;">
             <td style="padding: 10px 12px; font-weight: 700;">{strategy_badge}</td>
             <td style="padding: 10px 12px; white-space: nowrap;">
-                <strong>{format_number(opt.total_distance_km, 1)} km</strong>
+                <strong class="sc-mono">{format_number(opt.total_distance_km, 1)} km</strong>
                 <span style="color: #64748b; font-size: 0.76rem;">({detour_r:.2f}x detour)</span>
             </td>
             <td style="padding: 10px 12px; white-space: nowrap;">
-                <strong>{format_duration_text(opt.estimated_duration_mins)}</strong>
+                <strong class="sc-mono">{format_duration_text(opt.estimated_duration_mins)}</strong>
             </td>
             <td style="padding: 10px 12px; text-align: center;">
-                <span style="font-weight: 800; color: {score_color};">{opt.overall_safety_score:.0f}</span>/100
+                <span class="sc-mono" style="font-weight: 800; color: {score_color};">
+                    {opt.overall_safety_score:.0f}</span>/100
             </td>
             <td style="padding: 10px 12px; text-align: center;">
-                <span style="color: #0284c7; font-weight: 700;">{pct_prot:.0f}%</span>
+                <span class="sc-mono" style="color: #0284c7; font-weight: 700;">{pct_prot:.0f}%</span>
             </td>
             <td style="padding: 10px 12px; text-align: center;">{pct_infra:.0f}%</td>
             <td style="padding: 10px 12px; text-align: center;">
@@ -7815,7 +8616,6 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
         </tr>
         """)
 
-    # Candidate Lifecycle Architecture Summary KPIs
     kpi_block_html = ""
     if lifecycle_summary:
         kpi_box_base = "border-radius: 8px; padding: 10px; text-align: center;"
@@ -7824,41 +8624,41 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
         kpi_block_html = f"""
         <div style="margin-bottom: 16px;">
             <div style="font-weight: 700; color: #064e3b; font-size: 0.92rem; margin-bottom: 8px;
-                display: flex; align-items: center; gap: 6px;">
-                <span>🧬</span> Candidate Discovery & Multi-Stage Lifecycle Architecture
+                display: flex; align-items: center; gap: 7px;">
+                {sc_icon("activity", 16)} Candidate Discovery &amp; Multi-Stage Lifecycle Architecture
             </div>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px;">
                 <div style="background: #f8fafc; border: 1.5px solid #cbd5e1; {kpi_box_base}">
                     <div style="{kpi_lbl_base} color: #64748b;">1. Probed / Discovered</div>
-                    <div style="{kpi_val_base} color: #1e293b;">
+                    <div class="sc-mono" style="{kpi_val_base} color: #1e293b;">
                         {lifecycle_summary.get('discovered_count', 0):,}
                     </div>
                     <div style="font-size: 0.68rem; color: #64748b;">corridor alternatives</div>
                 </div>
                 <div style="background: #f0fdf4; border: 1.5px solid #bbf7d0; {kpi_box_base}">
                     <div style="{kpi_lbl_base} color: #166534;">2. Validated Viable</div>
-                    <div style="{kpi_val_base} color: #15803d;">
+                    <div class="sc-mono" style="{kpi_val_base} color: #15803d;">
                         {lifecycle_summary.get('validated_count', 0):,}
                     </div>
                     <div style="font-size: 0.68rem; color: #166534;">passed spur/freeway gate</div>
                 </div>
                 <div style="background: #ecfdf5; border: 1.5px solid #a7f3d0; {kpi_box_base}">
                     <div style="{kpi_lbl_base} color: #065f46;">3. Recommended</div>
-                    <div style="{kpi_val_base} color: #047857;">
+                    <div class="sc-mono" style="{kpi_val_base} color: #047857;">
                         {lifecycle_summary.get('recommended_count', 0):,}
                     </div>
                     <div style="font-size: 0.68rem; color: #065f46;">top ranking options</div>
                 </div>
                 <div style="background: #f5f3ff; border: 1.5px solid #ddd6fe; {kpi_box_base}">
                     <div style="{kpi_lbl_base} color: #5b21b6;">4. Possible Options</div>
-                    <div style="{kpi_val_base} color: #6d28d9;">
+                    <div class="sc-mono" style="{kpi_val_base} color: #6d28d9;">
                         {lifecycle_summary.get('possible_count', 0):,}
                     </div>
                     <div style="font-size: 0.68rem; color: #5b21b6;">unselected alternatives</div>
                 </div>
                 <div style="background: #fff1f2; border: 1.5px solid #fecdd3; {kpi_box_base}">
                     <div style="{kpi_lbl_base} color: #991b1b;">5. Filtered / Rejected</div>
-                    <div style="{kpi_val_base} color: #b91c1c;">
+                    <div class="sc-mono" style="{kpi_val_base} color: #b91c1c;">
                         {lifecycle_summary.get('rejected_count', 0):,}
                     </div>
                     <div style="font-size: 0.68rem; color: #991b1b;">excessive loop / freeway</div>
@@ -7867,7 +8667,6 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
         </div>
         """
 
-    # Possible Corridors Table if present
     possible_table_html = ""
     if lifecycle_summary and lifecycle_summary.get("possible_log"):
         p_rows = []
@@ -7881,15 +8680,18 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
             <tr style="border-bottom: 1px solid #e2e8f0; font-size: 0.82rem;">
                 <td style="padding: 8px 12px; font-weight: 700; color: #4338ca;">
                     <span style="background: #f5f3ff; border: 1px solid #ddd6fe;
-                        padding: 2px 8px; border-radius: 6px;">🧭 {p_cand}</span>
+                        padding: 2px 8px; border-radius: 6px;display:inline-flex;align-items:center;gap:5px;">
+                        {sc_icon("compass", 13)} {p_cand}</span>
                 </td>
                 <td style="padding: 8px 12px; font-weight: 600;">{p_corr}</td>
-                <td style="padding: 8px 12px; white-space: nowrap;"><strong>{format_number(p_dist, 1)} km</strong></td>
+                <td style="padding: 8px 12px; white-space: nowrap;">
+                    <strong class="sc-mono">{format_number(p_dist, 1)} km</strong>
+                </td>
                 <td style="padding: 8px 12px; text-align: center;">
-                    <span style="font-weight: 800; color: #4338ca;">{p_safe:.0f}</span>/100
+                    <span class="sc-mono" style="font-weight: 800; color: #4338ca;">{p_safe:.0f}</span>/100
                 </td>
                 <td style="padding: 8px 12px; color: #92400e; font-size: 0.78rem;">
-                    <strong>💡 Rationale:</strong> {p_reason}
+                    <strong>Rationale:</strong> {p_reason}
                 </td>
             </tr>
             """)
@@ -7898,11 +8700,7 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
             border-radius: 8px; padding: 12px 16px;">
             <div style="font-weight: 700; color: #4338ca; font-size: 0.90rem; margin-bottom: 8px;
                 display: flex; align-items: center; gap: 6px;">
-                <span>🧭</span> Validated Possible Alternative Corridors (Unselected Options)
-            </div>
-            <div style="font-size: 0.8rem; color: #5b21b6; margin-bottom: 8px;">
-                These through-corridors were validated as legally accessible cycling options,
-                but were not promoted to recommended status. They remain accessible on the map.
+                {sc_icon("compass", 16)} Validated Possible Alternative Corridors
             </div>
             <div style="overflow-x: auto; background: #ffffff; border-radius: 6px; border: 1px solid #e9d5ff;">
                 <table style="width: 100%; border-collapse: collapse; text-align: left;">
@@ -7924,7 +8722,6 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
         </div>
         """
 
-    # 2. Pairwise Geometric Similarity / Overlap Matrix
     matrix_cells = []
     for r1 in all_keys:
         for r2 in all_keys:
@@ -7952,7 +8749,6 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
                         '</span>'
                     )
 
-    # 3. Discarded & Rejected Candidates Log
     discarded_items = []
     seen_disc = set()
     disc_code_style = (
@@ -7989,33 +8785,26 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
         )
 
     details_open_attr = "open" if beta_mode else ""
-    if beta_mode:
-        beta_badge = (
-            '<span style="background: #ecfdf5; color: #047857; font-size: 0.72rem; '
-            'font-weight: 700; padding: 2px 8px; border-radius: 9999px; '
-            'border: 1px solid #a7f3d0; margin-left: 8px;">Active Diagnostics</span>'
-        )
-    else:
-        beta_badge = (
-            '<span style="background: #f1f5f9; color: #64748b; font-size: 0.72rem; '
-            'font-weight: 600; padding: 2px 8px; border-radius: 9999px; '
-            'margin-left: 8px;">Click to Expand</span>'
-        )
+    beta_badge = (
+        '<span style="background: #ecfdf5; color: #047857; font-size: 0.72rem; '
+        'font-weight: 700; padding: 2px 8px; border-radius: 6px; '
+        'border: 1px solid #a7f3d0; margin-left: 8px;">Active Diagnostics</span>'
+    )
 
     return f"""
     <details {details_open_attr} style="margin: 18px 0 24px 0; background: #ffffff;
-        border: 1.5px solid #cbd5e1; border-radius: 10px; overflow: hidden;
+        border: 1px solid #cbd5e1; border-radius: 10px; overflow: hidden;
         box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <summary style="padding: 14px 18px; cursor: pointer; font-weight: 800; color: #0f172a;
+        <summary style="padding: 14px 18px; cursor: pointer; font-weight: 700; color: #0f172a;
             background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex;
             align-items: center; justify-content: space-between; user-select: none;">
-            <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="font-size: 1.1rem;">🔍</span>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="color:#047857;">{sc_icon("search", 16)}</span>
                 <span>Route Evaluation & Routing Diagnostics</span>
                 {beta_badge}
             </div>
             <span style="font-size: 0.78rem; color: #64748b; font-weight: 500;">
-                Multi-criteria Scoring • Geometric Overlap • Rejection Audit Log
+                Multi-criteria Scoring &middot; Geometric Overlap &middot; Rejection Audit Log
             </span>
         </summary>
         <div style="padding: 18px 20px;">
@@ -8024,7 +8813,7 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
             <div style="margin-bottom: 16px;">
                 <div style="font-weight: 700; color: #064e3b; font-size: 0.92rem; margin-bottom: 8px;
                     display: flex; align-items: center; gap: 6px;">
-                    <span>📊</span> Candidate Route Scoring & Tradeoff Matrix
+                    {sc_icon("bar_chart", 16)} Candidate Route Scoring &amp; Tradeoff Matrix
                 </div>
                 <div style="overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px;">
                     <table style="width: 100%; border-collapse: collapse; text-align: left; background: #ffffff;">
@@ -8032,7 +8821,7 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
                             <tr style="background: #f8fafc; border-bottom: 1.5px solid #cbd5e1;
                                 font-size: 0.75rem; color: #475569; text-transform: uppercase;">
                                 <th style="padding: 8px 12px;">Route Strategy</th>
-                                <th style="padding: 8px 12px;">Distance & Detour</th>
+                                <th style="padding: 8px 12px;">Distance &amp; Detour</th>
                                 <th style="padding: 8px 12px;">Duration</th>
                                 <th style="padding: 8px 12px; text-align: center;">Safety Score</th>
                                 <th style="padding: 8px 12px; text-align: center;">Protected</th>
@@ -8054,12 +8843,7 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
                 border-radius: 8px; padding: 12px 16px;">
                 <div style="font-weight: 700; color: #064e3b; font-size: 0.88rem; margin-bottom: 8px;
                     display: flex; align-items: center; gap: 6px;">
-                    <span>📐</span> Pairwise Geometric Overlap & Corridor Separation Matrix
-                </div>
-                <div style="font-size: 0.8rem; color: #475569; margin-bottom: 8px;">
-                    Calculated using spatial buffer indexing (45m corridor). Pairs with
-                    <strong>&le; 85% overlap</strong> represent genuine, physically distinct
-                    alternative corridors.
+                    {sc_icon("layers", 15)} Pairwise Geometric Overlap &amp; Corridor Separation Matrix
                 </div>
                 <div style="display: flex; flex-wrap: wrap; gap: 8px;">
                     {''.join(matrix_cells)}
@@ -8069,11 +8853,7 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
             <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 12px 16px;">
                 <div style="font-weight: 700; color: #9a3412; font-size: 0.88rem; margin-bottom: 6px;
                     display: flex; align-items: center; gap: 6px;">
-                    <span>🛡️</span> Candidate Rejection & Anti-Detour Audit Log
-                </div>
-                <div style="font-size: 0.8rem; color: #7c2d12; margin-bottom: 6px;">
-                    Tracks candidate corridors probed and eliminated to prevent dead-end hooks,
-                    excessive detours, or redundant paths:
+                    {sc_icon("shield", 15)} Candidate Rejection &amp; Anti-Detour Audit Log
                 </div>
                 <ul style="margin: 0; padding-left: 20px; font-size: 0.78rem;">
                     {''.join(discarded_items)}
@@ -8083,18 +8863,20 @@ def render_route_evaluation_debug_panel(routes: Dict[str, RouteOption], beta_mod
     </details>
     """
 
-# --- Page 2: Route Results ---
+
 def _render_route_results_page(
     state: State,
     precomputed_routes: Optional[Dict[str, RouteOption]] = None,
 ) -> Page:
-    """Render Route Results page in Basic Mode (simple overview) or Advanced Mode (full telemetry)."""
+    """Render Route Results in split map + single overview layout for Basic or Advanced mode."""
     state.current_page = "results"
     is_adv = bool(getattr(state, "advanced_mode", False))
 
     notification_block = []
     if state.notification:
-        notification_block.append(RawHTML(f'<div class="notification-banner">ℹ️ {state.notification}</div>'))
+        notification_block.append(
+            RawHTML(f'<div class="notification-banner">{sc_icon("info", 16)} {state.notification}</div>')
+        )
         state.notification = ""
 
     routes = precomputed_routes if precomputed_routes is not None else get_routes_from_state(state)
@@ -8117,162 +8899,27 @@ def _render_route_results_page(
     rec_keys = [k for k in all_keys if getattr(routes[k], "classification", "RECOMMENDED") == "RECOMMENDED"]
     possible_keys = [k for k in all_keys if getattr(routes[k], "classification", "RECOMMENDED") == "POSSIBLE"]
 
-    strava_cards = []
-    for r_type in rec_keys:
-        r_opt = routes[r_type]
-        is_active = (r_type == active_type)
-        if r_type == "Safest":
-            fn = select_safest_mode
-        elif r_type == "Balanced":
-            fn = select_balanced_mode
-        elif r_type == "Direct":
-            fn = select_direct_mode
-        else:
-            fn = select_custom_mode
-        strava_cards.append(render_strava_route_card(
-            r_opt,
-            r_type,
-            is_active,
-            fn,
-            planned_speed_mph=cur_spd,
-            departure_time=cur_dep,
-            advanced_mode=is_adv,
-        ))
-
-    possible_section_block = []
-    if is_adv and possible_keys:
-        possible_cards = []
-        for r_type in possible_keys:
-            r_opt = routes[r_type]
-            is_active = (r_type == active_type)
-            possible_cards.append(render_possible_route_card(
-                r_opt,
-                r_type,
-                is_active,
-                planned_speed_mph=cur_spd,
-                departure_time=cur_dep,
-            ))
-        if possible_cards:
-            possible_section_block = [
-                Div([
-                    Header(
-                        "🧭 Possible Alternative Corridors (Unselected Options)",
-                        level=3,
-                        style="color: #3730a3; margin-top: 0; margin-bottom: 4px; "
-                        "display: flex; align-items: center; gap: 8px;",
-                    ),
-                    Paragraph(
-                        "These corridors were discovered and validated as feasible cycling paths, "
-                        "but are not actively recommended due to lack of dedicated infrastructure "
-                        "or detours without proportional safety gains. They remain available "
-                        "for your review on the map and below:",
-                        style="font-size: 0.82rem; color: #475569; margin-bottom: 12px;",
-                    ),
-                    Row(possible_cards, style="gap: 14px; flex-wrap: wrap; margin-bottom: 8px; align-items: stretch;"),
-                ], classes="card", style="border-left: 4px solid #6366f1; background: #faf5ff; margin-bottom: 22px;")
-            ]
-
     tf = get_time_of_day_traffic_factor(cur_dep)
     is_rush = tf.get("is_rush_hour", False)
-    start_fmt, end_fmt, _ = compute_trip_schedule(cur_dep, current_route.estimated_duration_mins)
-
-    pill_base = (
-        "padding: 4px 12px; border-radius: 9999px; font-weight: 700; "
-        "font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px;"
-    )
     if is_rush:
-        lbl = tf.get("label", "Peak Rush Hour")
-        traffic_badge = (
-            f'<span style="background: #fff7ed; color: #c2410c; '
-            f'border: 1.5px solid #fdba74; {pill_base}">'
-            f"🚗 {lbl} • Heavy Traffic on Arterials</span>"
-        )
+        traffic_lbl = tf.get("label", "Rush Hour")
+        traffic_style = "background:#fff7ed;color:#c2410c;border:1px solid #fdba74;"
+        traffic_ico = sc_icon("alert", 12)
     elif "night" in tf.get("period", "").lower():
-        lbl = tf.get("label", "Night Hours")
-        traffic_badge = (
-            f'<span style="background: #f5f3ff; color: #6d28d9; '
-            f'border: 1.5px solid #ddd6fe; {pill_base}">'
-            f"🌙 {lbl} • Low Volume / Fast Drivers</span>"
-        )
+        traffic_lbl = tf.get("label", "Night Hours")
+        traffic_style = "background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe;"
+        traffic_ico = sc_icon("moon", 12)
     else:
-        lbl = tf.get("label", "Mid-Day Standard Flow")
-        traffic_badge = (
-            f'<span style="background: #ecfdf5; color: #047857; '
-            f'border: 1.5px solid #a7f3d0; {pill_base}">'
-            f"☀️ {lbl} • Normal Traffic</span>"
-        )
-
-    beta_timing_note = ""
-    if not state.beta_mode:
-        if SHOW_BETA_TOGGLE:
-            beta_timing_note = """
-            <div style="font-size: 0.76rem; color: #64748b; margin-top: 6px;
-                        display: flex; align-items: center; gap: 4px;">
-                <span>💡 <em>To dynamically adjust departure schedule or speed after
-                route generation, enable <strong>Beta Mode</strong>.</em></span>
-            </div>
-            """
-    else:
-        beta_timing_note = """
-        <div style="font-size: 0.76rem; color: #047857; margin-top: 6px; font-weight: 600;
-                    display: flex; align-items: center; gap: 4px;">
-            <span>⚡ <em>Beta Mode Active: Live Schedule & Speed Recalculator enabled below.</em></span>
-        </div>
-        """
-
-    if is_adv:
-        timing_summary_bar = f"""
-        <div style="background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 10px;
-                    padding: 12px 18px; margin: 10px 0 14px 0;
-                    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-                    display: flex; flex-direction: column; gap: 6px;">
-            <div style="display: flex; justify-content: space-between;
-                        align-items: center; flex-wrap: wrap; gap: 12px;">
-                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                    <span style="font-weight: 800; color: #0f172a; font-size: 0.95rem;
-                                 display: inline-flex; align-items: center; gap: 6px;">
-                        🚴 Trip Schedule:
-                        <span style="color: #047857; background: #ecfdf5; padding: 3px 8px;
-                                     border-radius: 6px; border: 1px solid #a7f3d0;">
-                            {start_fmt} → {end_fmt}
-                        </span>
-                    </span>
-                    <span style="background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0;
-                                 padding: 3px 10px; border-radius: 9999px;
-                                 font-weight: 700; font-size: 0.8rem;">
-                        ⏱️ {format_duration_text(current_route.estimated_duration_mins)} @ {cur_spd:.0f} mph
-                    </span>
-                    {traffic_badge}
-                </div>
-                <div style="font-size: 0.82rem; color: #475569; font-weight: 500;">
-                    {tf.get("advisory", "")}
-                </div>
-            </div>
-            {beta_timing_note}
-        </div>
-        """
-    else:
-        timing_summary_bar = f"""
-        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-                    margin: 6px 0 12px 0; font-size: 0.78rem; color: #475569;">
-            <span style="background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0;
-                         padding: 3px 9px; border-radius: 9999px; font-weight: 700;">
-                🚴 {start_fmt} → {end_fmt}
-            </span>
-            <span style="background: #f1f5f9; color: #334155; border: 1px solid #e2e8f0;
-                         padding: 3px 9px; border-radius: 9999px; font-weight: 600;">
-                @ {cur_spd:.0f} mph
-            </span>
-            {traffic_badge}
-        </div>
-        """
+        traffic_lbl = tf.get("label", "Normal Traffic")
+        traffic_style = "background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;"
+        traffic_ico = sc_icon("sun", 12)
 
     quick_timing_selector = Div([
         Div([
             RawHTML(
-                '<div style="font-size: 0.82rem; font-weight: 700; color: #047857; '
-                'margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">'
-                '<span>⚡</span> Dynamic Schedule & Speed Recalculator (Beta Feature)</div>'
+                f'<div style="font-size: 0.82rem; font-weight: 700; color: #047857; '
+                f'margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">'
+                f'{sc_icon("sliders", 14)} Dynamic Schedule &amp; Speed Recalculator (Beta)</div>'
             )
         ]),
         Row([
@@ -8281,113 +8928,86 @@ def _render_route_results_page(
                 Row([
                     TextBox("time_hhmm", cur_hhmm),
                     SelectBox("time_ampm", ["AM", "PM"], cur_ampm),
-                ], style="gap: 6px; align-items: center;"),
-                Paragraph(
-                    "00:00 format",
-                    style="font-size: 0.72rem; color: #64748b; margin-top: 2px; margin-bottom: 0;",
-                ),
+                ], classes="sc-time-row"),
             ], style="flex: 1; min-width: 175px;"),
             Div([
                 Label("Planned Speed (mph):", "planned_speed"),
                 TextBox("planned_speed", cur_spd_str),
-                Paragraph(
-                    "e.g. 12.0 or 15",
-                    style="font-size: 0.72rem; color: #64748b; margin-top: 2px; margin-bottom: 0;",
-                ),
             ], style="flex: 1; min-width: 110px;"),
             Div([
                 Label("&nbsp;", "submit_timing_label"),
                 Button(
-                    "🔄 Update Schedule",
+                    "Update Schedule",
                     update_results_timing,
-                    style="background: #047857; color: white; padding: 8px 16px; "
-                    "border-radius: 6px; font-weight: 700; cursor: pointer; border: none;",
+                    classes="sc-btn sc-btn-brand sc-ico-refresh",
                 ),
             ], style="flex: 0 0 auto;"),
             Div([
-                SmallText("Quick Preset Chips:"),
+                SmallText("Quick Presets:"),
                 Row([
                     Button(
-                        "🌅 8:30 AM", update_results_timing,
+                        "8:30 AM", update_results_timing,
                         [Argument("departure_time", "08:30 AM"), Argument("planned_speed", cur_spd_str)],
+                        classes="sc-btn sc-btn-secondary sc-btn-sm",
                     ),
                     Button(
-                        "☀️ 12:00 PM", update_results_timing,
+                        "12:00 PM", update_results_timing,
                         [Argument("departure_time", "12:00 PM"), Argument("planned_speed", cur_spd_str)],
+                        classes="sc-btn sc-btn-secondary sc-btn-sm",
                     ),
                     Button(
-                        "🌆 5:15 PM", update_results_timing,
+                        "5:15 PM", update_results_timing,
                         [Argument("departure_time", "05:15 PM"), Argument("planned_speed", cur_spd_str)],
+                        classes="sc-btn sc-btn-secondary sc-btn-sm",
                     ),
                     Button(
-                        "🌙 10:00 PM", update_results_timing,
+                        "10:00 PM", update_results_timing,
                         [Argument("departure_time", "10:00 PM"), Argument("planned_speed", cur_spd_str)],
-                    ),
-                    Button(
-                        "10 mph", update_results_timing,
-                        [Argument("departure_time", cur_dep), Argument("planned_speed", "10.0")],
+                        classes="sc-btn sc-btn-secondary sc-btn-sm",
                     ),
                     Button(
                         "12 mph", update_results_timing,
                         [Argument("departure_time", cur_dep), Argument("planned_speed", "12.0")],
+                        classes="sc-btn sc-btn-ghost sc-btn-sm",
                     ),
                     Button(
                         "15 mph", update_results_timing,
                         [Argument("departure_time", cur_dep), Argument("planned_speed", "15.0")],
-                    ),
-                    Button(
-                        "18 mph", update_results_timing,
-                        [Argument("departure_time", cur_dep), Argument("planned_speed", "18.0")],
+                        classes="sc-btn sc-btn-ghost sc-btn-sm",
                     ),
                 ], style="gap: 5px; flex-wrap: wrap;"),
-            ], style="flex: 2; min-width: 250px;"),
+            ], style="flex: 2; min-width: 240px;"),
         ], style="align-items: flex-end; gap: 12px; flex-wrap: wrap;"),
-    ], style="margin-bottom: 14px; background: #f8fafc; border: 1.5px dashed #059669; "
-    "border-radius: 8px; padding: 12px 14px;")
+    ], classes="card", style="margin-bottom: 14px; border-left: 4px solid #047857; padding: 12px 14px;")
 
-    deck_subtitle = (
-        "Compare elevation gain, surface protection splits, ride time, and detailed safety scores side-by-side."
+    mode_btn_label = "Basic View" if is_adv else "Advanced Mode"
+    mode_btn_cls = (
+        "sc-btn sc-btn-mode-active sc-ico-sliders"
         if is_adv else
-        "Pick a route card or tap a path on the map."
-    )
-    mode_btn_label = "🌱 Basic View" if is_adv else "🔬 Advanced Mode"
-    mode_btn_style = (
-        "background: #ecfdf5; color: #065f46; border: 1.5px solid #10b981; "
-        "padding: 4px 10px; border-radius: 9999px; font-size: 0.74rem; "
-        "font-weight: 700; cursor: pointer; margin: 0; line-height: 1.2;"
-        if is_adv else
-        "background: #f1f5f9; color: #334155; border: 1.5px solid #cbd5e1; "
-        "padding: 4px 10px; border-radius: 9999px; font-size: 0.74rem; "
-        "font-weight: 700; cursor: pointer; margin: 0; line-height: 1.2;"
+        "sc-btn sc-btn-mode sc-ico-sliders"
     )
     deck_header_row = Div([
         Row([
             Div([
                 Row([
                     RawHTML(
-                        '<span class="strava-deck-title" style="font-size: 1.2rem; font-weight: 800; '
-                        'color: #0f172a; display: inline-flex; align-items: center; gap: 7px;">'
-                        '<span style="color: #047857; font-size: 1.3rem;">📊</span>'
-                        ' Route Options Comparison</span>'
+                        f'<span class="strava-deck-title">{sc_icon("bar_chart", 18)} '
+                        'Route Options Comparison</span>'
                     ),
-                    Button(mode_btn_label, toggle_advanced_mode, style=mode_btn_style),
-                ], style="gap: 10px; align-items: center; flex-wrap: wrap;"),
+                    Button(mode_btn_label, toggle_advanced_mode, classes=mode_btn_cls),
+                ], classes="sc-deck-title-row"),
                 RawHTML(
-                    f'<div style="font-size: 0.8rem; color: #64748b; margin-top: 2px;">'
-                    f'{deck_subtitle}</div>'
+                    '<div style="font-size: 0.78rem; color: #64748b; margin-top: 4px;">'
+                    'Click any route line on the map to inspect its overview beside the map.</div>'
                 ),
-            ], style="flex: 1 1 280px; min-width: 0;"),
+            ], style="flex: 1 1 240px; min-width: 0;"),
             Div([
                 RawHTML(
-                    f'<span id="safecycle_active_deck_pill" class="strava-pill-active" '
-                    'style="white-space: nowrap; display: inline-flex; align-items: center; '
-                    'font-size: 0.78rem; font-weight: 700; padding: 5px 12px; '
-                    'border-radius: 9999px; background: #047857; color: #ffffff; '
-                    'box-shadow: 0 1px 3px rgba(0,0,0,0.12);">'
-                    f'Active on Map: {active_type} Route</span>'
+                    f'<span id="safecycle_active_deck_pill" class="strava-pill-active">'
+                    f'Selected: {active_type} Route</span>'
                 ),
-            ], style="flex-shrink: 0; white-space: nowrap; margin-left: auto;"),
-        ], style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;")
+            ], style="flex: 0 0 auto; max-width: 100%;"),
+        ], classes="sc-deck-head-row")
     ], classes="strava-deck-header")
 
     start_c = (
@@ -8407,31 +9027,47 @@ def _render_route_results_page(
         state.dest_address,
         start_c,
         end_c,
-        height_px=460 if is_adv else 360,
+        height_px=500 if is_adv else 440,
     )
 
-    route_sections = []
+    tab_keys = all_keys if is_adv else (rec_keys or all_keys)
+    switch_tabs_btns = []
+    for t_key in tab_keys:
+        t_cls = "sc-switch-tab is-active" if t_key == active_type else "sc-switch-tab"
+        t_label = "Alt Corridor" if t_key.startswith("Possible: ") else t_key
+        switch_tabs_btns.append(
+            f'<button type="button" class="{t_cls}" data-route-tab="{t_key}" '
+            f'onclick="window.safecycleSelectRoute(\'{t_key}\')">{t_label}</button>'
+        )
+    switch_tabs_html = f'<div class="sc-switch-tabs">{"".join(switch_tabs_btns)}</div>'
+
+    overview_slots: List[Component] = [RawHTML(switch_tabs_html)]
+    route_sections: List[Component] = []
+    possible_section_block: List[Component] = []
+
     for r_type in all_keys:
         r_opt = routes[r_type]
         is_route_active = (r_type == active_type)
         safe_id = sanitize_route_dom_id(r_type)
+        is_possible_opt = getattr(r_opt, "classification", "RECOMMENDED") == "POSSIBLE"
 
-        nav_btn_style = (
-            "background: #047857; color: white; padding: 9px 16px; "
-            "font-weight: 700; border-radius: 6px;"
-        )
-        save_btn_style = (
-            "background: #0284c7; color: white; padding: 9px 16px; "
-            "font-weight: 600; border-radius: 6px;"
-        )
+        if r_type == "Safest":
+            fn = select_safest_mode
+        elif r_type == "Balanced":
+            fn = select_balanced_mode
+        elif r_type == "Direct":
+            fn = select_direct_mode
+        else:
+            fn = select_custom_mode
+
         action_buttons = [
             *(
                 [
                     Button(
-                        "🚴 Start Live GPS Navigation (Beta)",
+                        "Start Navigation",
                         start_route_navigation,
                         Argument("route_type", r_type),
-                        style=nav_btn_style,
+                        classes="sc-btn sc-btn-brand sc-btn-sm sc-ico-compass",
                     )
                 ]
                 if state.beta_mode
@@ -8440,73 +9076,98 @@ def _render_route_results_page(
             *(
                 [
                     Button(
-                        "💾 Save Route to Favorites (Beta)",
+                        "Save Route",
                         save_specific_route,
                         Argument("route_type", r_type),
-                        style=save_btn_style,
+                        classes="sc-btn sc-btn-secondary sc-btn-sm sc-ico-bookmark",
                     )
                 ]
                 if state.beta_mode
                 else []
             ),
             Button(
-                "📥 Export GPX File",
+                "Export GPX",
                 export_specific_gpx,
                 Argument("route_type", r_type),
-                style="background: #047857; color: white; padding: 9px 16px; "
-                "font-weight: 700; border-radius: 6px; border: none;",
+                classes="sc-btn sc-btn-primary sc-btn-sm sc-ico-download",
             ),
             Button(
-                "🔄 Change Route Settings",
+                "Edit Settings",
                 go_to_planner,
-                style="background: #f1f5f9; color: #1e293b; padding: 9px 16px; "
-                "font-weight: 600; border-radius: 6px; border: 1px solid #cbd5e1;",
+                classes="sc-btn sc-btn-ghost sc-btn-sm sc-ico-sliders",
             ),
         ]
 
-        if not is_adv:
-            top_warn = (
-                f" • ⚠️ {r_opt.warnings[0]}"
-                if r_opt.warnings else " • ✅ Smooth cycling corridor"
+        r_start, r_end, _ = compute_trip_schedule(cur_dep, r_opt.estimated_duration_mins)
+        sched_row_html = (
+            '<div style="display:flex;justify-content:space-between;align-items:center;'
+            'flex-wrap:wrap;gap:6px;font-size:0.76rem;">'
+            f'<span style="color:#475569;display:inline-flex;align-items:center;gap:5px;font-weight:600;">'
+            f'{sc_icon("clock", 13)} {r_start} &rarr; {r_end} &middot; {cur_spd:.0f} mph</span>'
+            f'<span style="{traffic_style}padding:2px 8px;border-radius:6px;'
+            f'display:inline-flex;align-items:center;gap:4px;font-weight:600;">'
+            f'{traffic_ico} {traffic_lbl}</span></div>'
+        )
+
+        if is_possible_opt:
+            card_comp = render_possible_route_card(
+                r_opt, r_type, is_route_active, planned_speed_mph=cur_spd, departure_time=cur_dep
             )
-            route_sections.extend([
-                RawHTML(
-                    f'<div id="route_section_{safe_id}" class="route-mode-section" '
-                    f'style="display: {"block" if is_route_active else "none"};">'
-                ),
-                Div([
-                    Row([
-                        Div([
-                            Strong(f"{r_type} Route Ready", style="font-size: 0.96rem; color: #064e3b;"),
-                            Paragraph(
-                                f"{r_opt.overall_safety_score:.0f}/100 safety{top_warn}",
-                                style="font-size: 0.8rem; color: #475569; margin: 2px 0 0 0;",
-                            ),
-                        ], style="flex: 1 1 240px; min-width: 0;"),
-                        Row(action_buttons, style="gap: 8px; flex-wrap: wrap; align-items: center;"),
-                    ], style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;"),
-                ], classes="card", style="padding: 12px 16px; margin-bottom: 14px;"),
-                RawHTML('</div>'),
-            ])
+        else:
+            card_comp = render_strava_route_card(
+                r_opt,
+                r_type,
+                is_route_active,
+                fn,
+                planned_speed_mph=cur_spd,
+                departure_time=cur_dep,
+                advanced_mode=is_adv,
+                single_view=True,
+            )
+
+        if r_opt.warnings:
+            alert_html = (
+                f'<div class="sc-inline-alert is-warn">{sc_icon("alert", 14)}'
+                f'<span>{r_opt.warnings[0]}</span></div>'
+            )
+        else:
+            alert_html = (
+                f'<div class="sc-inline-alert is-ok">{sc_icon("check", 14)}'
+                f'<span>Low-stress cycling corridor along quiet streets and bikeways.</span></div>'
+            )
+
+        overview_slots.extend([
+            RawHTML(
+                f'<div id="route_overview_slot_{safe_id}" class="sc-overview-slot" '
+                f'style="display: {"flex" if is_route_active else "none"};">'
+            ),
+            RawHTML(sched_row_html),
+            card_comp,
+            RawHTML(alert_html),
+            Row(action_buttons, style="gap: 8px; flex-wrap: wrap; align-items: center; margin-top: auto;"),
+            RawHTML('</div>'),
+        ])
+
+        if not is_adv:
             continue
 
         w_block = []
         if r_opt.warnings:
-            warn_items = "".join([f"<li>⚠️ {w}</li>" for w in r_opt.warnings])
+            warn_items = "".join([f"<li>{w}</li>" for w in r_opt.warnings])
             w_block.append(RawHTML(f"""
             <div class="warning-box">
-                <strong>Safety Alerts for this Route:</strong>
-                <ul style="margin: 4px 0 0 16px; padding: 0;">{warn_items}</ul>
+                <strong style="display:inline-flex;align-items:center;gap:6px;">
+                    {sc_icon("alert", 15)} Safety Alerts for this Route:</strong>
+                <ul style="margin: 4px 0 0 18px; padding: 0;">{warn_items}</ul>
             </div>
             """))
 
         corridors = consolidate_route_corridors(r_opt.segments)
-
         kpi_box = (
             "background: #f8fafc; border: 1px solid #e2e8f0; "
             "border-radius: 8px; padding: 10px 12px; text-align: center;"
         )
-        kpi_lbl = "font-size: 0.72rem; color: #64748b; font-weight: 600; text-transform: uppercase;"
+        kpi_lbl = "font-size: 0.7rem; color: #64748b; font-weight: 600; text-transform: uppercase;"
         risk_col = "#dc2626" if r_opt.high_risk_segments_count > 0 else "#16a34a"
 
         total_km = max(0.1, sum(s.length_km for s in r_opt.segments))
@@ -8534,17 +9195,17 @@ def _render_route_results_page(
         <div class="card" style="margin-bottom: 16px; padding: 14px 18px;">
             <div style="display: flex; justify-content: space-between; align-items: center;
                         margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
-                <strong style="color: #064e3b; font-size: 0.92rem;">
-                    🛣️ Safety Corridor Spectrum ({r_type} Route)
+                <strong style="color: #064e3b; font-size: 0.92rem; display:inline-flex;align-items:center;gap:7px;">
+                    {sc_icon("road", 16)} Safety Corridor Spectrum ({r_type} Route)
                 </strong>
                 <span style="font-size: 0.78rem; color: #64748b;">
                     Risk distribution along {format_number(r_opt.total_distance_km, 1)} km
                     ({r_opt.lifecycle_stage.title()})
                 </span>
             </div>
-            <div style="display: flex; height: 12px; width: 100%; border-radius: 9999px;
+            <div style="display: flex; height: 11px; width: 100%; border-radius: 9999px;
                         overflow: hidden; background: #e2e8f0;
-                        box-shadow: inset 0 1px 2px rgba(0,0,0,0.1); margin-bottom: 8px;">
+                        box-shadow: inset 0 1px 2px rgba(0,0,0,0.08); margin-bottom: 8px;">
                 {''.join(bar_segments)}
             </div>
             <div style="display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.76rem;
@@ -8574,38 +9235,38 @@ def _render_route_results_page(
                     gap: 10px; margin-bottom: 14px;">
             <div style="{kpi_box}">
                 <div style="{kpi_lbl}">Overall Safety</div>
-                <div style="font-size: 1.25rem; font-weight: 800; color: #047857; margin-top: 2px;">
+                <div class="sc-mono" style="font-size: 1.25rem; font-weight: 800; color: #047857; margin-top: 2px;">
                     {r_opt.overall_safety_score:.0f}
                     <span style="font-size: 0.8rem; font-weight: 500; color: #64748b;">/100</span>
                 </div>
             </div>
             <div style="{kpi_box}">
                 <div style="{kpi_lbl}">Bike Infrastructure</div>
-                <div style="font-size: 1.25rem; font-weight: 800; color: #0284c7; margin-top: 2px;">
+                <div class="sc-mono" style="font-size: 1.25rem; font-weight: 800; color: #0284c7; margin-top: 2px;">
                     {r_opt.bike_infrastructure_percentage:.0f}%
                 </div>
             </div>
             <div style="{kpi_box}">
                 <div style="{kpi_lbl}">High Risk Spots</div>
-                <div style="font-size: 1.25rem; font-weight: 800; color: {risk_col}; margin-top: 2px;">
+                <div class="sc-mono" style="font-size: 1.25rem; font-weight: 800; color: {risk_col}; margin-top: 2px;">
                     {r_opt.high_risk_segments_count:,}
                 </div>
             </div>
             <div style="{kpi_box}">
                 <div style="{kpi_lbl}">Crossings</div>
-                <div style="font-size: 1.25rem; font-weight: 800; color: #b45309; margin-top: 2px;">
+                <div class="sc-mono" style="font-size: 1.25rem; font-weight: 800; color: #b45309; margin-top: 2px;">
                     {r_opt.major_intersections_count:,}
                 </div>
             </div>
             <div style="{kpi_box}">
                 <div style="{kpi_lbl}">Elevation Gain</div>
-                <div style="font-size: 1.25rem; font-weight: 800; color: #475569; margin-top: 2px;">
+                <div class="sc-mono" style="font-size: 1.25rem; font-weight: 800; color: #475569; margin-top: 2px;">
                     {format_number(r_opt.elevation_gain_m, 0)} m
                 </div>
             </div>
             <div style="{kpi_box}">
                 <div style="{kpi_lbl}">Confidence</div>
-                <div style="font-size: 1.05rem; font-weight: 800; color: #0369a1; margin-top: 4px;">
+                <div style="font-size: 1.05rem; font-weight: 700; color: #0369a1; margin-top: 4px;">
                     {r_opt.confidence_level}
                 </div>
             </div>
@@ -8622,13 +9283,14 @@ def _render_route_results_page(
             spd_label = f"{c['speed_limit_mph']} mph" if c["speed_limit_mph"] else "Low speed"
             traf_label = c["traffic_exposure"].title()
             sub_detail = (
-                f"{format_number(c['length_km'], 1)} km • {infra_label} • {spd_label} • {traf_label} traffic"
+                f"{format_number(c['length_km'], 1)} km &bull; {infra_label} "
+                f"&bull; {spd_label} &bull; {traf_label} traffic"
             )
 
             corridor_rows.append(Div([
                 Row([
                     Div([
-                        Strong(c["name"], style="font-size: 0.95rem; color: #0f172a;"),
+                        Strong(c["name"], style="font-size: 0.94rem; color: #0f172a;"),
                         Paragraph(
                             sub_detail,
                             style="font-size: 0.78rem; color: #64748b; margin: 2px 0 0 0;",
@@ -8636,20 +9298,18 @@ def _render_route_results_page(
                     ], style="flex: 3; min-width: 180px;"),
                     Div([
                         RawHTML(
-                            f'<span style="background: {col}15; color: {col}; font-weight: 700; '
-                            f'font-size: 0.82rem; padding: 3px 10px; border-radius: 9999px; '
+                            f'<span class="sc-mono" style="background: {col}15; color: {col}; font-weight: 700; '
+                            f'font-size: 0.8rem; padding: 3px 10px; border-radius: 6px; '
                             f'border: 1px solid {col}35; display: inline-block;">'
-                            f'{c["safety_score"]:.0f}/100 • {c["risk_category"].title()}</span>'
+                            f'{c["safety_score"]:.0f}/100 &middot; {c["risk_category"].title()}</span>'
                         )
                     ], style="flex: 1.2; text-align: center; min-width: 110px;"),
                     Div([
                         Button(
-                            "🔍 Inspect",
+                            "Inspect",
                             inspect_segment,
                             Argument("segment_id", c["primary_segment_id"]),
-                            style="background: #f8fafc; color: #334155; border: 1px solid #cbd5e1; "
-                            "padding: 5px 12px; border-radius: 6px; font-size: 0.78rem; "
-                            "font-weight: 600; cursor: pointer;",
+                            classes="sc-btn sc-btn-secondary sc-btn-sm sc-ico-search",
                         )
                     ], style="flex: 0.8; text-align: right; min-width: 80px;"),
                 ], style="align-items: center; padding: 10px 0; border-bottom: 1px solid #f1f5f9; gap: 8px;")
@@ -8660,19 +9320,7 @@ def _render_route_results_page(
                 f'<div id="route_section_{safe_id}" class="route-mode-section" '
                 f'style="display: {"block" if is_route_active else "none"};">'
             ),
-            Div([
-                Row([
-                    Div([
-                        Header(f"{r_type} Bicycle Route Overview", level=2, style="color: #064e3b; margin: 0;"),
-                        Paragraph(
-                            r_opt.selection_rationale,
-                            style="color: #475569; font-size: 0.9rem; margin-top: 4px;",
-                        ),
-                    ], style="flex: 2;"),
-                ], style="align-items: center; margin-bottom: 8px;"),
-                *w_block,
-                Row(action_buttons, style="gap: 10px; flex-wrap: wrap; margin-bottom: 10px;"),
-            ], classes="card"),
+            *w_block,
             *spectrum_section,
             Div([
                 Header(
@@ -8681,8 +9329,7 @@ def _render_route_results_page(
                     style="color: #064e3b; margin-top: 0; margin-bottom: 4px;",
                 ),
                 Paragraph(
-                    "Key road corridors and bikeways along this route grouped by thoroughfare "
-                    "with risk ratings, speed limits, and traffic levels.",
+                    "Corridors along this route with risk ratings, speed limits, and traffic exposure.",
                     style="font-size: 0.82rem; color: #64748b; margin-top: 0; margin-bottom: 12px;",
                 ),
                 RawHTML(metrics_summary_html),
@@ -8691,23 +9338,34 @@ def _render_route_results_page(
             RawHTML('</div>'),
         ])
 
+    if is_adv and possible_keys:
+        possible_cards = [
+            render_possible_route_card(
+                routes[p_key], p_key, p_key == active_type, planned_speed_mph=cur_spd, departure_time=cur_dep
+            )
+            for p_key in possible_keys
+        ]
+        possible_section_block = [
+            Div([
+                RawHTML(
+                    f'<h3 style="display:flex;align-items:center;gap:8px;color:#3730a3;margin:0 0 8px 0;">'
+                    f'{sc_icon("compass", 17)} Possible Alternative Corridors</h3>'
+                ),
+                Row(possible_cards, style="gap: 14px; flex-wrap: wrap; align-items: stretch;"),
+            ], classes="card", style="border-left: 4px solid #6366f1; margin-bottom: 18px;")
+        ]
+
     return Page(state, [
         render_navbar("results", state.beta_mode, state),
         *notification_block,
-        Div([
-            Header(
-                "🗺️ Bicycle Route Comparison Map",
-                level=3,
-                style="color: #064e3b; margin-top: 0; margin-bottom: 8px;",
-            ),
-            RawHTML(results_map_html),
-        ], classes="card"),
         deck_header_row,
-        RawHTML(timing_summary_bar),
         *([quick_timing_selector, RawHTML(render_timemask_script_html())] if state.beta_mode else []),
-        Row(strava_cards, style="gap: 14px; flex-wrap: wrap; margin-bottom: 18px; align-items: stretch;"),
-        *possible_section_block,
+        Div([
+            Div([RawHTML(results_map_html)], classes="sc-results-map-card"),
+            Div(overview_slots, classes="sc-overview-panel"),
+        ], classes="sc-results-split"),
         *route_sections,
+        *possible_section_block,
         *(
             [RawHTML(render_route_evaluation_debug_panel(routes, state.beta_mode))]
             if state.beta_mode
@@ -8719,7 +9377,7 @@ def _render_route_results_page(
 
 @route
 def route_results_page(state: State) -> Page:
-    """Route Results page: Strava-style comparison deck, corridor breakdown, and interactive map."""
+    """Route Results page: interactive map paired with single selected route overview."""
     return _render_route_results_page(state)
 
 
@@ -8732,7 +9390,6 @@ def segment_details_page(state: State) -> Page:
     routes = get_routes_from_state(state)
     active_route = routes.get(state.active_route_type, list(routes.values())[0])
 
-    # Find selected segment or first segment
     selected_seg = None
     for s in active_route.segments:
         if s.segment_id == state.selected_segment_id:
@@ -8742,13 +9399,17 @@ def segment_details_page(state: State) -> Page:
         selected_seg = active_route.segments[0]
         state.selected_segment_id = selected_seg.segment_id
 
+    ok_svg = sc_icon("check", 14)
+    warn_svg = sc_icon("alert", 14)
     badge_cls = f"badge-{selected_seg.risk_category.lower().replace('_', '-')}"
     pos_items = "".join([
-        f"<li style='color: #15803d; margin-bottom: 4px;'>✅ {p}</li>"
+        f"<li style='color:#15803d;margin-bottom:5px;display:flex;align-items:flex-start;gap:6px;'>"
+        f"{ok_svg}<span>{p}</span></li>"
         for p in selected_seg.positive_factors
     ]) or "<li>No specific positive factors identified.</li>"
     neg_items = "".join([
-        f"<li style='color: #b91c1c; margin-bottom: 4px;'>⚠️ {n}</li>"
+        f"<li style='color:#b91c1c;margin-bottom:5px;display:flex;align-items:flex-start;gap:6px;'>"
+        f"{warn_svg}<span>{n}</span></li>"
         for n in selected_seg.negative_factors
     ]) or "<li>No critical negative risk factors identified.</li>"
 
@@ -8759,7 +9420,7 @@ def segment_details_page(state: State) -> Page:
         <strong>Total Reported Incidents:</strong> {cr.total_crashes:,} collision(s)<br>
         <strong>Severe Cyclist Injuries:</strong> {cr.severe_injuries:,}<br>
         <strong>Fatalities:</strong> {cr.fatalities:,}<br>
-        <strong>Database & Date Range:</strong> {cr.data_source} ({cr.date_range})<br>
+        <strong>Database &amp; Date Range:</strong> {cr.data_source} ({cr.date_range})<br>
         <small style="color: #64748b;"><em>Note: {cr.limitations}</em></small>
         """
 
@@ -8767,8 +9428,9 @@ def segment_details_page(state: State) -> Page:
     if selected_seg.safer_alternative:
         alternative_html = f"""
         <div style="background: #eff6ff; border-left: 4px solid #3b82f6;
-                    padding: 12px; border-radius: 6px; margin-top: 14px;">
-            <strong style="color: #1d4ed8;">💡 Recommended Safer Alternative:</strong>
+                    padding: 12px; border-radius: 8px; margin-top: 14px;">
+            <strong style="color: #1d4ed8; display:inline-flex;align-items:center;gap:6px;">
+                {sc_icon("compass", 15)} Recommended Safer Alternative:</strong>
             <p style="margin: 4px 0 0 0; color: #1e40af; font-size: 0.9rem;">
                 {selected_seg.safer_alternative}
             </p>
@@ -8798,7 +9460,8 @@ def segment_details_page(state: State) -> Page:
         )
         crash_section_html = f"""
         <div style="margin-top: 18px;">
-            <h4 style="color: #064e3b; margin-bottom: 6px;">🚨 Official Crash Records</h4>
+            <h4 style="color: #064e3b; margin-bottom: 6px; display:flex;align-items:center;gap:6px;">
+                {sc_icon("alert", 16)} Official Crash Records</h4>
             <div style="background: #f8fafc; border: 1px solid #e2e8f0;
                         padding: 12px; border-radius: 8px; font-size: 0.85rem;">
                 {crash_info}
@@ -8816,7 +9479,7 @@ def segment_details_page(state: State) -> Page:
         crash_section_html = ""
         provenance_html = (
             '<div style="margin-top: 14px; font-size: 0.8rem; color: #64748b;">'
-            'Switch to <strong>Advanced Safety Mode</strong> above to view official '
+            'Switch to <strong>Advanced Mode</strong> above to view official '
             'crash records, data confidence ratings, and DOT source notes.</div>'
         )
 
@@ -8826,7 +9489,7 @@ def segment_details_page(state: State) -> Page:
                     align-items: flex-start; margin-bottom: 12px;">
             <div>
                 <span class="{badge_cls}">
-                    {selected_seg.safety_score} / 100 ({selected_seg.risk_category})
+                    Safety Score: {selected_seg.safety_score} / 100 ({selected_seg.risk_category})
                 </span>
                 {conf_badge}
                 <h2 style="color: #064e3b; margin: 8px 0 4px 0;">{selected_seg.name}</h2>
@@ -8866,66 +9529,62 @@ def segment_details_page(state: State) -> Page:
         </div>
 
         <div style="margin-top: 18px;">
-            <h4 style="color: #064e3b; margin-bottom: 8px;">📊 Contributing Safety Factors</h4>
+            <h4 style="color: #064e3b; margin-bottom: 8px; display:flex;align-items:center;gap:7px;">
+                {sc_icon("bar_chart", 16)} Contributing Safety Factors</h4>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
                 <div style="background: #f0fdf4; border: 1px solid #bbf7d0;
                             padding: 12px; border-radius: 8px;">
                     <strong style="color: #166534; font-size: 0.85rem;">Positive Safety Attributes</strong>
-                    <ul style="margin: 6px 0 0 16px; padding: 0; font-size: 0.85rem;">{pos_items}</ul>
+                    <ul style="margin: 6px 0 0 0; padding: 0; list-style: none; font-size: 0.85rem;">
+                        {pos_items}</ul>
                 </div>
                 <div style="background: #fef2f2; border: 1px solid #fecaca;
                             padding: 12px; border-radius: 8px;">
-                    <strong style="color: #991b1b; font-size: 0.85rem;">Risk Penalties & Hazards</strong>
-                    <ul style="margin: 6px 0 0 16px; padding: 0; font-size: 0.85rem;">{neg_items}</ul>
+                    <strong style="color: #991b1b; font-size: 0.85rem;">Risk Penalties &amp; Hazards</strong>
+                    <ul style="margin: 6px 0 0 0; padding: 0; list-style: none; font-size: 0.85rem;">
+                        {neg_items}</ul>
                 </div>
             </div>
         </div>
 
         {crash_section_html}
-
         {alternative_html}
-
         {provenance_html}
     </div>
     """
 
     notification_block = []
     if state.notification:
-        notification_block.append(RawHTML(f'<div class="notification-banner">ℹ️ {state.notification}</div>'))
+        notification_block.append(
+            RawHTML(f'<div class="notification-banner">{sc_icon("info", 16)} {state.notification}</div>')
+        )
         state.notification = ""
 
-    fav_btn_style = (
-        "background: #047857; color: white; padding: 7px 18px; border: none; "
-        "border-radius: 8px; font-weight: 700; cursor: pointer; "
-        "box-shadow: 0 2px 5px rgba(4,120,87,0.25);"
-    )
     return Page(state, [
         render_navbar("details", state.beta_mode, state),
         *notification_block,
         Div([
             Row([
                 Button(
-                    "⬅️ Back to Route Results",
+                    "Back to Route Results",
                     go_to_results,
-                    style="background: #f1f5f9; color: #1e293b; padding: 7px 16px; "
-                    "border: 1px solid #cbd5e1; border-radius: 8px; font-weight: 600; cursor: pointer;",
+                    classes="sc-btn sc-btn-secondary sc-btn-sm sc-ico-arrow-left",
                 ),
                 *(
                     [
                         Button(
-                            "⭐ Save This Route to Favorites (Beta)",
+                            "Save Current Route",
                             handle_save_current_route,
-                            style=fav_btn_style,
+                            classes="sc-btn sc-btn-brand sc-btn-sm sc-ico-star",
                         )
                     ]
                     if state.beta_mode
                     else []
                 ),
                 Button(
-                    "📥 Export GPX Track",
+                    "Export GPX Track",
                     handle_export_gpx,
-                    style="background: #0284c7; color: white; padding: 7px 16px; "
-                    "border: none; border-radius: 8px; font-weight: 600; cursor: pointer;",
+                    classes="sc-btn sc-btn-primary sc-btn-sm sc-ico-download",
                 ),
             ], style="gap: 10px; margin-bottom: 14px; flex-wrap: wrap; align-items: center;")
         ]),
@@ -8934,14 +9593,16 @@ def segment_details_page(state: State) -> Page:
         render_beta_corner_toggle(state),
     ])
 
-# --- Page 4: Navigation ---
+
 @route
 def navigation_page(state: State) -> Page:
     """Live GPS navigation page: High-contrast, turn-by-turn guidance, upcoming safety warnings."""
     state.current_page = "navigation"
     notification_block = []
     if state.notification:
-        notification_block.append(RawHTML(f'<div class="notification-banner">ℹ️ {state.notification}</div>'))
+        notification_block.append(
+            RawHTML(f'<div class="notification-banner">{sc_icon("info", 16)} {state.notification}</div>')
+        )
         state.notification = ""
     routes = get_routes_from_state(state)
     active_route = routes.get(state.active_route_type, list(routes.values())[0])
@@ -8953,7 +9614,6 @@ def navigation_page(state: State) -> Page:
     next_turn = turns[current_idx + 1] if current_idx + 1 < len(turns) else None
     total_turns = len(turns)
 
-    # Calculate remaining distance
     rem_dist_km = sum(t.distance_m for t in turns[current_idx:]) / 1000.0
     rem_time_mins = round((rem_dist_km / 16.0) * 60, 0)
 
@@ -8961,18 +9621,19 @@ def navigation_page(state: State) -> Page:
     if current_turn and current_turn.safety_warning:
         warning_banner = f"""
         <div style="background: #dc2626; color: white; padding: 14px; border-radius: 8px;
-                    margin-bottom: 16px; font-weight: 600; font-size: 1rem;">
-            ⚠️ {current_turn.safety_warning}
+                    margin-bottom: 16px; font-weight: 600; font-size: 1rem;
+                    display:flex;align-items:center;gap:8px;">
+            {sc_icon("alert", 18)} <span>{current_turn.safety_warning}</span>
         </div>
         """
 
     icon_map = {
-        "end": "🛑",
-        "start": "🟢",
-        "turn_left": "↩️",
-        "turn_right": "↪️",
+        "end": sc_icon("flag", 36),
+        "start": sc_icon("bike", 36),
+        "turn_left": sc_icon("turn_left", 36),
+        "turn_right": sc_icon("turn_right", 36),
     }
-    turn_icon = icon_map.get(current_turn.icon, "⬆️") if current_turn else "⬆️"
+    turn_icon = icon_map.get(current_turn.icon, sc_icon("arrow_up", 36)) if current_turn else sc_icon("arrow_up", 36)
     step_num = current_turn.step_number if current_turn else state.nav_step
     street_label = current_turn.street_name if current_turn else active_route.route_type
     dist_line = (
@@ -8991,18 +9652,18 @@ def navigation_page(state: State) -> Page:
     <div class="nav-turn-card">
         <div style="display: flex; justify-content: space-between; align-items: center;
                     color: #94a3b8; font-size: 0.85rem; margin-bottom: 12px;">
-            <span>STEP {step_num} OF {total_turns} • {street_label}</span>
+            <span>STEP {step_num} OF {total_turns} &middot; {street_label}</span>
             <span>{state.nav_status}</span>
         </div>
         <div style="display: flex; align-items: center; gap: 16px;">
-            <div style="font-size: 3rem;">
+            <div style="color: #34d399; display:flex; align-items:center; justify-content:center;">
                 {turn_icon}
             </div>
             <div>
-                <div style="font-size: 1.8rem; font-weight: 700; line-height: 1.2;">
+                <div style="font-size: 1.7rem; font-weight: 700; line-height: 1.2;">
                     {current_turn.instruction if current_turn else 'Navigation Complete'}
                 </div>
-                <div style="font-size: 1.2rem; color: #38bdf8; margin-top: 4px;">
+                <div style="font-size: 1.15rem; color: #38bdf8; margin-top: 4px;">
                     {dist_line}
                 </div>
             </div>
@@ -9014,26 +9675,27 @@ def navigation_page(state: State) -> Page:
     metrics_html = f"""
     <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px;">
         <div class="stat-pill">
-            <div class="stat-value">{format_number(rem_dist_km, 1)} km</div>
+            <div class="stat-value sc-mono">{format_number(rem_dist_km, 1)} km</div>
             <div class="stat-label">Remaining Distance</div>
         </div>
         <div class="stat-pill">
-            <div class="stat-value">{format_duration_text(rem_time_mins)}</div>
+            <div class="stat-value sc-mono">{format_duration_text(rem_time_mins)}</div>
             <div class="stat-label">Est. Time Remaining</div>
         </div>
         <div class="stat-pill">
-            <div class="stat-value">16 km/h</div>
+            <div class="stat-value sc-mono">16 km/h</div>
             <div class="stat-label">Cycling Pace</div>
         </div>
     </div>
     """
 
-    disclaimer = """
+    disclaimer = f"""
     <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 10px 14px;
-                border-radius: 6px; margin-bottom: 16px; font-size: 0.85rem; color: #92400e;">
-        <strong>🛑 Cyclist Distraction Warning:</strong> Always stop your bicycle in a safe,
-        protected location away from motor traffic before checking or interacting with this device.
-        Keep both hands on the handlebars while riding.
+                border-radius: 8px; margin-bottom: 16px; font-size: 0.85rem; color: #92400e;
+                display:flex;align-items:flex-start;gap:8px;">
+        <span style="margin-top:2px;">{sc_icon("alert", 16)}</span>
+        <span><strong>Cyclist Distraction Warning:</strong> Always stop your bicycle in a safe,
+        protected location away from motor traffic before checking or interacting with this device.</span>
     </div>
     """
 
@@ -9047,45 +9709,27 @@ def navigation_page(state: State) -> Page:
         Div([
             Header("Navigation Controls", level=3, style="color: #064e3b; margin-top: 0;"),
             Row([
-                Button(
-                    "⏭️ Next Turn Step",
-                    handle_next_nav_step,
-                    style="background: #047857; color: white; padding: 10px 18px; "
-                    "font-weight: 600; border-radius: 6px;",
-                ),
-                Button(
-                    "⏮️ Previous Turn",
-                    handle_prev_nav_step,
-                    style="background: #475569; color: white; padding: 10px 18px; "
-                    "font-weight: 600; border-radius: 6px;",
-                ),
-                Button(
-                    "🔄 Recalculate Route",
-                    handle_recalculate_route,
-                    style="background: #d97706; color: white; padding: 10px 18px; "
-                    "font-weight: 600; border-radius: 6px;",
-                ),
-                Button(
-                    "🛑 End Navigation",
-                    go_to_results,
-                    style="background: #dc2626; color: white; padding: 10px 18px; "
-                    "font-weight: 600; border-radius: 6px;",
-                ),
-            ], style="gap: 10px; flex-wrap: wrap;")
+                Button("Next Turn Step", handle_next_nav_step, classes="sc-btn sc-btn-brand sc-ico-arrow-right"),
+                Button("Previous Turn", handle_prev_nav_step, classes="sc-btn sc-btn-secondary sc-ico-arrow-left"),
+                Button("Recalculate Route", handle_recalculate_route, classes="sc-btn sc-btn-secondary sc-ico-refresh"),
+                Button("End Navigation", go_to_results, classes="sc-btn sc-btn-danger sc-ico-stop"),
+            ], style="gap: 10px; flex-wrap: wrap;"),
         ], classes="card"),
-        render_beta_corner_toggle(state)
+        render_beta_corner_toggle(state),
     ])
 
-# --- Page 5: Saved Routes ---
+
 @route
 def saved_routes_page(state: State) -> Page:
     """Saved Routes page: List saved favorite routes, reload them onto map, export GPX, or delete."""
     state.current_page = "saved"
     saved_items = load_saved_routes()
-    
+
     notification_block = []
     if state.notification:
-        notification_block.append(RawHTML(f'<div class="notification-banner">ℹ️ {state.notification}</div>'))
+        notification_block.append(
+            RawHTML(f'<div class="notification-banner">{sc_icon("info", 16)} {state.notification}</div>')
+        )
         state.notification = ""
 
     route_rows = []
@@ -9099,14 +9743,14 @@ def saved_routes_page(state: State) -> Page:
         start_short = r.start_label.split(",")[0]
         dest_short = r.dest_label.split(",")[0]
         saved_meta = (
-            f"Saved: {r.created_at} • Corridor: {r.route_type} • "
-            f"Distance: {format_number(r.distance_km, 1)} km ({format_number(dist_mi, 1)} mi) • "
+            f"Saved: {r.created_at} &bull; Corridor: {r.route_type} &bull; "
+            f"Distance: {format_number(r.distance_km, 1)} km ({format_number(dist_mi, 1)} mi) &bull; "
             f"Est: {format_duration_text(r.duration_mins)}"
         )
         score_badge_html = (
             '<div style="text-align: center;">'
-            f'<span class="{score_badge}" style="font-size: 0.95rem; font-weight: 700; '
-            f'padding: 4px 10px; border-radius: 9999px;">{r.safety_score:.0f} / 100</span>'
+            f'<span class="{score_badge} sc-mono" style="font-size: 0.92rem; font-weight: 700; '
+            f'padding: 4px 10px;">{r.safety_score:.0f} / 100</span>'
             '<div style="font-size: 0.72rem; color: #64748b; margin-top: 3px;">Safety Score</div>'
             "</div>"
         )
@@ -9114,59 +9758,56 @@ def saved_routes_page(state: State) -> Page:
         route_rows.append(Div([
             Row([
                 Div([
-                    Strong(f"🚲 {r.name}", style="font-size: 1.15rem; color: #064e3b;"),
+                    RawHTML(
+                        f'<strong style="font-size:1.05rem;color:#064e3b;display:inline-flex;'
+                        f'align-items:center;gap:6px;">{sc_icon("bike", 16)} {r.name}</strong>'
+                    ),
                     LineBreak(),
                     SmallText(
-                        f"From: {start_short} ➔ To: {dest_short}",
+                        f"{start_short} to {dest_short}",
                         style="font-weight: 600; color: #334155;",
                     ),
                     LineBreak(),
-                    SmallText(saved_meta, style="color: #64748b;")
-                ], style="flex: 3; min-width: 260px;"),
+                    SmallText(saved_meta, style="color: #64748b;"),
+                ], style="flex: 3; min-width: 240px;"),
                 Div([
-                    RawHTML(score_badge_html)
+                    RawHTML(score_badge_html),
                 ], style="flex: 1; min-width: 100px; text-align: center;"),
                 Div([
                     Row([
                         Button(
-                            "🚲 Load on Map",
+                            "Load on Map",
                             load_saved_route,
                             Argument("route_id", r.route_id),
-                            style="background: #047857; color: white; padding: 6px 14px; "
-                            "border: none; border-radius: 6px; font-weight: 700; cursor: pointer; "
-                            "box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
+                            classes="sc-btn sc-btn-brand sc-btn-sm sc-ico-map",
                         ),
                         Button(
-                            "📥 GPX",
+                            "GPX",
                             export_saved_route,
                             Argument("route_id", r.route_id),
-                            style="background: #0284c7; color: white; padding: 6px 12px; "
-                            "border: none; border-radius: 6px; font-weight: 600; cursor: pointer;",
+                            classes="sc-btn sc-btn-primary sc-btn-sm sc-ico-download",
                         ),
                         Button(
-                            "🗑️ Delete",
+                            "Delete",
                             delete_saved_route_handler,
                             Argument("route_id", r.route_id),
-                            style="background: #fee2e2; color: #b91c1c; "
-                            "border: 1px solid #fca5a5; padding: 6px 10px; "
-                            "border-radius: 6px; cursor: pointer;",
+                            classes="sc-btn sc-btn-danger sc-btn-sm sc-ico-trash",
                         ),
-                    ], style="gap: 8px; justify-content: flex-end; flex-wrap: wrap;")
-                ], style="flex: 2; text-align: right; min-width: 220px;")
+                    ], style="gap: 8px; justify-content: flex-end; flex-wrap: wrap;"),
+                ], style="flex: 2; text-align: right; min-width: 220px;"),
             ], style="align-items: center; padding: 14px 0; border-bottom: 1px solid #e2e8f0; "
-            "flex-wrap: wrap; gap: 12px;")
+            "flex-wrap: wrap; gap: 12px;"),
         ]))
 
     empty_saved_box = Div([
         Paragraph(
-            "No saved routes yet. Plan any route and click '⭐ Save Current Route' to bookmark it.",
+            "No saved routes yet. Plan a route and save it to bookmark your favorite corridors.",
             style="color: #64748b; font-style: italic;",
         ),
         Button(
-            "🗺️ Plan a New Route",
+            "Plan a New Route",
             go_to_planner,
-            style="background: #047857; color: white; padding: 8px 18px; "
-            "border: none; border-radius: 8px; font-weight: 700; cursor: pointer; margin-top: 8px;",
+            classes="sc-btn sc-btn-brand sc-ico-map",
         ),
     ], style="padding: 24px; text-align: center; background: #f8fafc; border-radius: 10px; "
     "border: 1px dashed #cbd5e1;")
@@ -9177,17 +9818,15 @@ def saved_routes_page(state: State) -> Page:
         Div([
             Header("Saved Bicycle Routes", level=2, style="color: #064e3b; margin-top: 0;"),
             Paragraph(
-                "Quickly reload and view your favorite safer routes on the interactive map, "
-                "or download them as GPX tracks directly to your bike computer (Garmin, Wahoo, Strava). "
-                "Saved routes persist in your browser across sessions.",
-                style="color: #475569; font-size: 0.92rem;",
+                "Reload saved routes onto the interactive map or export GPX tracks for your cycling computer.",
+                style="color: #475569; font-size: 0.9rem;",
             ),
-            *(route_rows if route_rows else [empty_saved_box])
+            *(route_rows if route_rows else [empty_saved_box]),
         ], classes="card"),
-        render_beta_corner_toggle(state)
+        render_beta_corner_toggle(state),
     ])
 
-# --- Page 6: About the Safety Score ---
+
 @route
 def about_page(state: State) -> Page:
     """About page: Algorithm weights, data sources, uncertainty, and hazard reporting."""
@@ -9195,23 +9834,21 @@ def about_page(state: State) -> Page:
 
     notification_block = []
     if state.notification:
-        notification_block.append(RawHTML(f'<div class="notification-banner">ℹ️ {state.notification}</div>'))
+        notification_block.append(
+            RawHTML(f'<div class="notification-banner">{sc_icon("info", 16)} {state.notification}</div>')
+        )
         state.notification = ""
 
-    # Community reports list: iterate over HazardReport dataclass instances
     reports_html = ""
     if state.reported_hazards:
-        report_items = []
-        for report in state.reported_hazards:
-            report_items.append(
-                f"<li><strong>{report.road}</strong>: "
-                f"{report.issue} (Reported: {report.reported_at})</li>"
-            )
-        items = "".join(report_items)
+        report_items = [
+            f"<li><strong>{report.road}</strong>: {report.issue} (Reported: {report.reported_at})</li>"
+            for report in state.reported_hazards
+        ]
         reports_html = (
             "<div style='margin-top: 10px;'>"
             "<strong>Recent Community Hazard Reports:</strong>"
-            f"<ul>{items}</ul></div>"
+            f"<ul>{''.join(report_items)}</ul></div>"
         )
 
     osm_meta = DATA_SOURCES_METADATA["osm"]
@@ -9219,34 +9856,31 @@ def about_page(state: State) -> Page:
     tc_meta = DATA_SOURCES_METADATA["traffic_counts"]
 
     beta_hazard_block = Div([
-        Header(
-            "🧪 Beta Mode: Report a Road Hazard or Incorrect Classification",
-            level=3,
-            style="color: #064e3b; margin-top: 16px;",
+        RawHTML(
+            f'<h3 style="display:flex;align-items:center;gap:8px;color:#064e3b;margin-top:16px;">'
+            f'{sc_icon("flask", 17)} Beta Mode: Report a Road Hazard or Incorrect Classification</h3>'
         ),
         Paragraph(
-            "Encountered a missing bike lane, pothole, dangerous dooring zone, or close pass? "
-            "Submit a report below to adjust community safety confidence:",
+            "Submit missing bike lanes, pavement hazards, or dooring zones to adjust local safety confidence:",
             style="font-size: 0.85rem; color: #64748b;",
         ),
         Row([
             Div([
                 Label("Road Name / Intersection:", "hazard_road"),
-                TextBox("hazard_road", "5th Ave & 34th St")
+                TextBox("hazard_road", "5th Ave & 34th St"),
             ], style="flex: 1;"),
             Div([
                 Label("Hazard Description:", "hazard_issue"),
-                TextBox("hazard_issue", "Frequent delivery vehicle double-parking in bike path")
+                TextBox("hazard_issue", "Frequent delivery vehicle double-parking in bike path"),
             ], style="flex: 2;"),
             Div([
                 Label("&nbsp;", "submit_label"),
                 Button(
-                    "⚠️ Submit Safety Report",
+                    "Submit Safety Report",
                     handle_submit_hazard,
-                    style="background: #dc2626; color: white; padding: 8px 16px; "
-                    "border-radius: 6px; font-weight: 600;",
-                )
-            ], style="flex: 1; margin-top: 4px;")
+                    classes="sc-btn sc-btn-danger sc-ico-alert",
+                ),
+            ], style="flex: 1; margin-top: 4px;"),
         ], style="gap: 12px; align-items: flex-end;"),
         RawHTML(reports_html),
     ])
@@ -9526,7 +10160,7 @@ def handle_save_current_route(state: State, custom_name: str = "") -> Page:
     encoded_gpx = urllib.parse.quote(gpx)
     clean_file_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", item.name.lower()) + ".gpx"
     state.notification = (
-        f"⭐ Saved '{item.name}'! Stored in your browser favorites. "
+        f"Saved '{item.name}'. "
         f"<a href='data:application/gpx+xml;charset=utf-8,{encoded_gpx}' "
         f"download='{clean_file_name}' style='color: #047857; font-weight: 700; "
         "text-decoration: underline; margin-left: 6px;'>Download GPX</a>"
@@ -9542,10 +10176,9 @@ def build_gpx_autodownload_html(prefix: str, gpx_content: str, file_name: str) -
         f'<a id="safecycle_gpx_download_link" data-auto-gpx="true" '
         f'data-filename="{file_name}" data-export-token="{export_token}" '
         f'href="data:application/gpx+xml;charset=utf-8,{encoded_gpx}" '
-        f'download="{file_name}" style="background: #047857; color: white; '
-        "padding: 4px 10px; border-radius: 6px; font-weight: 700; "
-        'text-decoration: none; display: inline-block; margin-left: 8px;">'
-        f"📥 Download {file_name} Again</a>"
+        f'download="{file_name}" class="sc-btn sc-btn-brand sc-btn-sm" '
+        'style="text-decoration:none;margin-left:8px;">'
+        f'{sc_icon("download", 13)} Download {file_name} Again</a>'
     )
 
 @route
@@ -9662,12 +10295,12 @@ def toggle_beta_mode(state: State) -> Page:
     state.beta_mode = not state.beta_mode
     if state.beta_mode:
         state.notification = (
-            "🧪 Beta Mode enabled! Live GPS Navigation, Saved Routes, "
-            "Benchmark Corridors, Route Diagnostics, and Hazard Reporting are now visible."
+            "Beta Mode enabled: Live GPS Navigation, Saved Routes, "
+            "Benchmark Corridors, Route Diagnostics, and Hazard Reporting unlocked."
         )
     else:
         state.notification = (
-            "🧪 Beta Mode disabled. Switched back to standard SafeCycle mode."
+            "Beta Mode disabled. Switched back to standard SafeCycle mode."
         )
 
     if state.current_page == "results":
@@ -9713,13 +10346,13 @@ def toggle_advanced_mode(state: State) -> Page:
     state.advanced_mode = not bool(getattr(state, "advanced_mode", False))
     if state.advanced_mode:
         state.notification = (
-            "🔬 Advanced Safety Mode enabled! Viewing full telemetry, elevation profiles, "
-            "surface splits, safety spectrum, and official crash records."
+            "Advanced Mode enabled: viewing elevation profiles, surface splits, "
+            "safety spectrum, corridor breakdown, and crash records."
         )
     else:
         state.notification = (
-            "🌱 Basic Safety View enabled! Showing streamlined safety scores, "
-            "ride time, and top route alerts."
+            "Basic View enabled: showing streamlined route safety scores, "
+            "ride time, and primary alerts."
         )
     if state.current_page == "details":
         return segment_details_page(state)
