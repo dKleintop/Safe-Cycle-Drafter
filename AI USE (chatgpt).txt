@@ -1,0 +1,489 @@
+make a prompt for google ai studio to make a bike gps and route maker app using python drafter. It must use drafter. I want it to solve the problem of people biking on dangerouse roads by making safe bike routes and displaying how safe roads are using data.
+
+result:
+Here’s a detailed prompt you can paste directly into Google AI Studio to build your bike GPS and safe-route-making app using Python and Drafter. It emphasizes real-world road safety data, safe route recommendations, and a clear map interface rather than simply finding the shortest route.
+
+# Project: SafeCycle — A Safety-First Bike GPS and Route Planner
+
+You are an expert Python developer, GIS engineer, UI/UX designer, and road-safety data analyst. Build a functional web application called **SafeCycle** that helps cyclists navigate their communities using safer bicycle routes instead of automatically sending them down the shortest or fastest roads.
+
+## 1. NON-NEGOTIABLE TECHNOLOGY REQUIREMENT
+
+**You MUST use Python Drafter to build the web application.**
+
+- Use the Python `drafter` library as the primary web framework for pages, navigation, forms, and application state.
+- Use Drafter's supported page definitions, route handlers, state management, and HTML components.
+- Write the backend and application logic in Python.
+- Do not replace Drafter with Flask, FastAPI, Django, Streamlit, React, Next.js, or another web framework.
+- Do not create a separate JavaScript or React application and merely connect it to Python.
+- Use the actual APIs supported by the installed version of Drafter. Verify the library's syntax and available components before implementing the application.
+- If additional HTML, CSS, or JavaScript is necessary for a map or GPS feature, integrate it into the Drafter application without replacing Drafter as the main framework.
+- Keep the application easy to run, test, and extend.
+
+If a feature cannot be implemented entirely with Drafter's built-in components, use a compatible solution that preserves Drafter as the primary framework.
+
+## 2. THE PROBLEM TO SOLVE
+
+Cyclists are often directed onto dangerous roads because ordinary navigation applications prioritize speed or distance over bicycle safety.
+
+SafeCycle should help cyclists answer three questions:
+
+1. How can I get to my destination using the safest practical bicycle route?
+2. How safe are the individual roads along my route, and what evidence supports that rating?
+3. Can I avoid high-speed roads, dangerous intersections, collision hotspots, and roads without suitable bicycle infrastructure?
+
+The application's central principle is:
+
+**Safety first. Distance and travel time second.**
+
+Never describe a route as guaranteed safe. Present safety estimates, their supporting evidence, data limitations, and uncertainty clearly.
+
+## 3. MAIN FEATURES
+
+### A. Interactive bicycle map
+
+Create a clean, responsive map interface that allows users to:
+
+- See their current GPS location after granting browser location permission.
+- Search for a starting point and destination.
+- Select locations by clicking on the map when supported.
+- Enter start and destination addresses manually.
+- View bike routes as colored lines on a map.
+- See road names, bicycle lanes, trails, intersections, and nearby points of interest when the underlying data supports them.
+- Zoom and pan around the map.
+- See their planned route and current position.
+- View individual road segments and their safety scores.
+
+Use a suitable mapping solution, such as Leaflet with OpenStreetMap map tiles, if compatible with the Drafter application. Use an appropriate geocoding service to convert addresses into coordinates.
+
+Do not assume that displaying a map automatically provides routing, live traffic, or safety information. Integrate the appropriate data sources and routing logic.
+
+### B. Safe bicycle route generator
+
+Users must be able to enter:
+
+- Starting location
+- Destination
+- Preferred route type
+- Maximum acceptable safety risk
+- Willingness to take a longer route to improve safety
+
+Provide three route options when sufficient data is available:
+
+1. **Safest Route:** Prioritizes lower-risk roads and bicycle infrastructure, even if the trip takes longer.
+2. **Balanced Route:** Balances safety, distance, and estimated travel time.
+3. **Direct Route:** Offers a more direct option while still accounting for road risk and clearly identifying dangerous segments.
+
+For each route, display:
+
+- Total distance
+- Estimated cycling time
+- Overall safety score
+- Number of high-risk segments
+- Percentage of the route on roads with dedicated bicycle infrastructure, when known
+- Number of major intersections, where data is available
+- Important warnings and suggested alternatives
+
+Do not fabricate three distinct routes if the routing engine cannot produce them. Explain when only one viable route is available.
+
+### C. Road safety scoring system
+
+Create a transparent safety scoring algorithm that assigns each road segment a score from 0 to 100.
+
+Higher scores mean lower estimated cycling risk. Scores must be based on available evidence rather than arbitrary guesses.
+
+Consider these factors:
+
+- **Bicycle infrastructure:** Protected bike lanes, painted bike lanes, shared lanes, bicycle paths, and trails.
+- **Vehicle speed:** Posted or otherwise documented speed limits.
+- **Traffic exposure:** Vehicle traffic volume, where reliable data is available.
+- **Crash history:** Reported bicycle collisions, injury severity, and collision frequency, where available.
+- **Intersection risk:** Known crash hotspots, complex intersections, and documented safety issues.
+- **Road characteristics:** Road type, number of lanes, and relevant roadway attributes.
+- **Data confidence:** How recent, complete, and reliable the available evidence is.
+
+Start with a transparent, configurable scoring model. For example, a preliminary weighting could be:
+
+- Bicycle infrastructure: 30%
+- Vehicle speed: 20%
+- Traffic exposure: 15%
+- Crash history: 20%
+- Intersection and road characteristics: 15%
+
+These are initial design weights, not scientifically validated coefficients. Normalize the available factors to a consistent scale, document assumptions, and allow future calibration against real crash and exposure data.
+
+Important scoring rules:
+
+- Protected bicycle infrastructure should generally improve a segment's score when the data supports that conclusion.
+- High vehicle speeds and high traffic exposure should generally reduce a segment's score.
+- Recent, relevant crash data should influence the risk estimate.
+- Missing information must be marked as unknown, not automatically treated as safe.
+- Do not award a road a high score simply because no crashes were found.
+- Account for the amount of cyclist exposure when possible. Raw crash counts alone can be misleading.
+- Do not present an estimate as a statistically validated probability of a collision.
+- Include a confidence label such as High, Medium, Low, or Insufficient Data.
+- Display which factors improved or reduced a segment's score.
+
+When data is missing, use an explicitly documented fallback model with lower confidence. Allow the application to identify roads that need more safety information.
+
+### D. Color-coded road safety visualization
+
+Display road segments using intuitive colors:
+
+- Green: Lower estimated risk based on available evidence.
+- Yellow: Moderate estimated risk.
+- Orange: Elevated estimated risk.
+- Red: High estimated risk.
+- Gray or a dashed line: Unknown or insufficient safety data.
+
+Make these categories configurable and explain that colors represent estimated risk, not guarantees of safety.
+
+When users select a road segment, open a detail panel showing:
+
+- Road name
+- Safety score
+- Risk category
+- Data confidence
+- Available bicycle infrastructure
+- Known speed limit
+- Traffic information, if available
+- Crash statistics and their date range, if available
+- Contributing risk factors
+- Data sources and last-updated dates
+- Reasons for the rating
+- Possible safer alternatives
+
+Use clear visual labels so users do not have to interpret a score without context.
+
+### E. Live bicycle GPS navigation
+
+Implement GPS-based navigation where the platform and browser permit it.
+
+Include:
+
+- Current location marker
+- Route overview
+- Turn-by-turn instructions when supported by the routing service
+- Distance to the next turn
+- Estimated remaining trip distance and time
+- Off-route detection
+- A button to recalculate the route
+- Safety warnings for upcoming high-risk road segments
+- A clear end-navigation button
+
+Request location permission only when necessary. Handle denied permissions, inaccurate GPS, poor connections, and unavailable location services gracefully.
+
+Do not claim to provide live traffic or live hazard detection unless an actual data source supports those features.
+
+Design the navigation screen to minimize distraction. Keep essential directions and warnings large, clear, and easy to understand. Remind users to stop in a safe place before interacting with their phones.
+
+### F. Safety warnings
+
+Warn users when their route includes:
+
+- High-speed roads without suitable bicycle infrastructure
+- Known bicycle collision hotspots
+- Roads with documented dangerous conditions
+- Complex intersections
+- Segments with insufficient safety information
+- Areas where a safer alternative exists
+
+Each warning should explain the reason and identify the relevant road segment.
+
+Do not invent hazards, closures, collision locations, or traffic conditions. Clearly distinguish official reports, third-party information, and model-generated estimates.
+
+### G. Save and share routes
+
+Allow users to:
+
+- Save favorite routes.
+- Give routes custom names.
+- Review route distance and safety information.
+- Reopen saved routes.
+- Export routes as GPX files when practical.
+- Share a route through an appropriate URL or downloadable route file when supported.
+
+Use persistent storage if available and appropriate. If persistent storage is unavailable, provide a clearly explained session-based fallback.
+
+## 4. DATA SOURCES AND INTEGRATIONS
+
+Use real data whenever possible.
+
+Investigate the following sources and select the best options for the deployment area:
+
+**OpenStreetMap**
+- Road network
+- Road classifications
+- Bicycle lanes and paths
+- Speed limits when mapped
+- Road geometry and intersection information
+
+**OpenStreetMap Overpass API**
+- Retrieve relevant road and bicycle infrastructure attributes.
+- Handle query timeouts and service limits.
+- Cache responses where permitted.
+
+**OpenStreetMap-based routing**
+- Evaluate an appropriate bicycle routing engine, such as openrouteservice or GraphHopper, depending on API access, usage limits, and licensing.
+- Determine whether the selected engine supports bicycle profiles, route alternatives, and the necessary road attributes.
+- Do not assume that an ordinary driving route is suitable for cycling.
+
+**Geocoding**
+- Integrate a suitable address-search service.
+- Follow its usage policies, attribution requirements, and rate limits.
+- Do not use a public geocoding endpoint as an unrestricted production service.
+
+**Official crash data**
+- Prefer official state, county, city, or national collision datasets.
+- Where possible, include bicycle-involved crashes, collision dates, injury severity, and geographic coordinates.
+- Include the source, date range, geographic coverage, and known limitations.
+
+**Additional safety data**
+- Investigate public traffic counts, speed-limit datasets, road inventories, bicycle-network plans, and official hazard or road-closure feeds.
+- Only integrate sources whose access conditions and licenses permit the intended use.
+
+For the initial version, prioritize a specific geographic area and make the data pipeline extensible to additional regions.
+
+If reliable crash data is unavailable, the app should still function using road-network and infrastructure data, but explicitly disclose the reduced confidence.
+
+Never fabricate API results, collision statistics, speed limits, or road safety scores to make the application look complete.
+
+If API keys are required, read them from environment variables and provide a `.env.example` file with placeholder values. Never expose secret keys in client-side code or commit them to source control.
+
+## 5. ROUTING ALGORITHM
+
+Build a routing algorithm that incorporates road safety into path selection.
+
+Represent the road network as a graph:
+
+- Nodes represent intersections or other routing points.
+- Edges represent road segments.
+- Each edge stores its length, estimated cycling time, safety attributes, data confidence, and safety score when available.
+
+Calculate a generalized route cost using distance, time, and estimated risk.
+
+For example:
+
+`edge_cost = distance_cost + time_cost + risk_cost + unknown_data_penalty`
+
+Make the weights configurable for the Safest, Balanced, and Direct route modes.
+
+Use an appropriate shortest-path algorithm, such as Dijkstra's algorithm or A*, when a locally available road graph is being processed.
+
+If routing is delegated to an external cycling-routing API, explain what the API handles and how the application incorporates safety information into the resulting route. Do not claim to run a locally implemented graph algorithm if the actual route is generated entirely by an external service.
+
+The route planner should:
+
+1. Generate a valid bicycle route.
+2. Match route geometry to road segments where possible.
+3. Retrieve or calculate available safety attributes.
+4. Penalize high-risk segments.
+5. Avoid high-risk roads when a reasonable alternative exists.
+6. Compare the safer alternative's distance and estimated time.
+7. Return an explanation of why the route was selected.
+8. Clearly disclose when data limitations prevent a reliable comparison.
+
+Do not simply subtract the safety score from the distance. Normalize cost components, document the scoring model, and use sensible units and configurable weights.
+
+## 6. USER INTERFACE AND DESIGN
+
+Create a polished, modern, responsive application with a safety-first design.
+
+Suggested visual identity:
+
+- Name: SafeCycle
+- Tagline: "Find your safer way."
+- Primary color: Deep green
+- Secondary color: Teal
+- Background: Light neutral gray or white
+- Warning colors: Yellow, orange, and red
+- Typography: Clean, readable sans-serif
+
+Build these pages using Drafter:
+
+1. **Home / Route Planner**
+   - Map
+   - Start and destination fields
+   - Route preference controls
+   - Generate Route button
+   - Safety legend
+
+2. **Route Results**
+   - Route map
+   - Alternative route choices
+   - Safety scores
+   - Distance and travel time
+   - Risk warnings
+   - Route comparison
+
+3. **Road Safety Details**
+   - Selected segment information
+   - Safety factors
+   - Data confidence
+   - Evidence and source dates
+
+4. **Navigation**
+   - Current position
+   - Directions
+   - Upcoming risk alerts
+   - Recalculate route control
+
+5. **Saved Routes**
+   - Saved routes
+   - Route summaries
+   - Load, export, and delete actions
+
+6. **About the Safety Score**
+   - Explain the scoring algorithm
+   - Explain the data sources
+   - Explain uncertainty and limitations
+
+Prioritize mobile usability because cyclists may plan routes on their phones. Make the main route-planning interface responsive, with the map and controls arranged appropriately for smaller screens.
+
+## 7. PYTHON DRAFTER IMPLEMENTATION
+
+Organize the project into clear, maintainable modules while retaining Drafter as the web framework.
+
+Suggested project structure:
+
+- `app.py` — Drafter application entry point, page routes, and state.
+- `routing.py` — Route generation and route comparison.
+- `safety.py` — Safety scoring and risk explanations.
+- `data_sources.py` — External data retrieval and normalization.
+- `geocoding.py` — Address and coordinate conversion.
+- `models.py` — Road segments, routes, and safety data structures.
+- `storage.py` — Saved-route persistence.
+- `static/` — Stylesheets, map-related assets, and permitted supporting scripts.
+- `tests/` — Automated tests for scoring and route selection.
+- `requirements.txt` — Dependencies.
+- `.env.example` — Required environment-variable names and placeholders.
+- `README.md` — Setup and usage instructions.
+
+Adjust this structure as needed for Drafter's actual runtime and deployment environment.
+
+Ensure every page is reachable through Drafter's routing and navigation model. Use valid Drafter state objects and supported page components. Keep external API calls out of page-rendering functions when doing so would cause repeated requests.
+
+If the target environment does not permit arbitrary static files or client-side scripts, choose a compatible integration strategy and document any limitations rather than silently replacing Drafter.
+
+## 8. ERROR HANDLING AND PERFORMANCE
+
+The app must handle:
+
+- API outages and rate limits
+- Invalid addresses
+- Missing coordinates
+- Empty routing results
+- Incomplete road attributes
+- Missing collision datasets
+- GPS permission denial
+- Network disconnections
+- Invalid or expired API keys
+- Unsupported map features
+
+Use reasonable timeouts, caching, clear error messages, and retry logic where appropriate.
+
+Do not freeze the entire application when one external data source fails. For example, if crash data is unavailable, show the route with a warning that the crash-based portion of the safety analysis could not be completed.
+
+Do not silently replace missing safety data with reassuring values.
+
+## 9. PRIVACY AND SAFETY
+
+- Request location access only with user consent.
+- Do not store precise location histories unnecessarily.
+- Do not transmit location information to unrelated services.
+- Explain which external services receive location or routing requests.
+- Use secure handling for API credentials.
+- Do not promise that any route is completely safe.
+- Clearly disclose stale or incomplete data.
+- Provide a way to report a road that appears dangerous or incorrectly classified, if practical.
+- Keep safety information readable and actionable.
+
+## 10. TESTING REQUIREMENTS
+
+Write automated tests for the most important application logic.
+
+Test cases must include:
+
+- A protected bike lane should generally score better than an otherwise comparable high-speed road without bicycle infrastructure.
+- A high-speed road with heavy traffic should generally receive a worse score than a comparable low-speed road with suitable bicycle infrastructure.
+- A road with missing safety data must not automatically receive a high safety score.
+- A route with a modest detour and substantially lower estimated risk should be preferred in Safest mode when both routes are valid.
+- Balanced mode should consider both risk and trip length.
+- Direct mode should favor shorter routes without hiding dangerous segments.
+- API failures should produce understandable errors.
+- Route distances and estimated times should use consistent units.
+- Empty or invalid routing results should not crash the application.
+
+These tests must reflect the implemented scoring model and use deterministic sample data.
+
+## 11. IMPLEMENTATION WORKFLOW
+
+Work through the project in this order:
+
+**Phase 1: Functional foundation**
+- Verify the Drafter library and its actual APIs.
+- Build the application shell and navigation.
+- Implement working start and destination inputs.
+- Create a basic interactive map integration.
+- Generate a valid bicycle route using a real routing source or a clearly labeled development fallback.
+
+**Phase 2: Road safety**
+- Retrieve road attributes.
+- Implement the transparent safety scoring model.
+- Display color-coded road segments.
+- Explain each score and its data confidence.
+
+**Phase 3: Safer routing**
+- Implement safety-aware route selection.
+- Add Safest, Balanced, and Direct modes.
+- Compare alternatives and explain route decisions.
+
+**Phase 4: GPS navigation**
+- Add browser geolocation.
+- Add turn-by-turn instructions where supported.
+- Implement off-route detection and recalculation.
+
+**Phase 5: Persistence and quality**
+- Add saved routes and GPX export.
+- Add error handling, automated tests, and documentation.
+- Improve the mobile interface.
+
+At the end of each phase, ensure the code remains runnable before proceeding.
+
+## 12. REQUIRED DELIVERABLES
+
+Produce the actual working application code, not just a mockup or a written explanation.
+
+Deliver:
+
+1. Complete Python code using Drafter as the primary web framework.
+2. All required supporting Python modules and permitted frontend assets.
+3. A complete dependency list.
+4. Environment-variable documentation.
+5. Instructions for installing dependencies and running the application.
+6. Instructions for obtaining and configuring any necessary API keys.
+7. A description of each data source and its limitations.
+8. Automated tests for the safety scoring and routing logic.
+9. A sample demonstration using clearly labeled sample data if live data is unavailable.
+10. A list of implemented features and any remaining limitations.
+
+Before declaring the application complete, verify the Drafter APIs against the installed version, check imports, run available tests, and fix any discovered errors.
+
+Do not fabricate successful test results or claim that untested features work.
+
+## FINAL ACCEPTANCE CRITERIA
+
+The project is only considered successful if:
+
+- Drafter is genuinely used to build and serve the application.
+- Users can enter a start and destination.
+- The application can generate a bicycle route.
+- Road segments can receive evidence-based or explicitly provisional safety assessments.
+- Safety scores include explanations and data-confidence indicators.
+- Users can compare routes based on safety, distance, and time.
+- Dangerous or unknown segments are clearly identified.
+- The interface explains where its information comes from.
+- Missing data and API failures are handled honestly.
+- The project includes runnable code and setup instructions.
+
+**Begin by verifying Drafter's API and creating a minimal working Drafter application. Then implement the map, real routing, road safety scoring, and safety-aware route selection. Do not replace the required framework with another one.**
