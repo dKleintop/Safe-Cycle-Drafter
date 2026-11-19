@@ -6286,10 +6286,9 @@ set_site_information(
         "map discovering safest, balanced, and direct corridors with paved shoulder "
         "and bike lane analysis."
     ),
-    sources="DelDOT Open Data, OpenStreetMap Delaware, University of Delaware GIS, Delaware State Parks",
+    sources="DelDOT Open Data, OpenStreetMap Delaware, University of Delaware GIS, Delaware State Parks, AI USE (chatgpt).txt",
     planning=(
-        "Balanced bicycle routing prioritizing protected infrastructure, "
-        "paved shoulders, low traffic volumes, and user preference tradeoffs."
+        "CS1 Final Project Design Plan (1).docx"
     ),
     links="https://github.com/dKleintop/Safe-Cycle-Drafter"
 )
