@@ -34,6 +34,8 @@ def configure_runtime_environment() -> None:
     except Exception:
         pass
     pkg_dir = os.path.join(base_dir, ".py311_packages")
+    if base_dir and base_dir not in sys.path:
+        sys.path.insert(0, base_dir)
     if os.path.exists(pkg_dir) and pkg_dir not in sys.path:
         sys.path.insert(0, pkg_dir)
 
