@@ -1,479 +1,331 @@
+"""geocoding.py - Fast location autofill catalog and live OpenStreetMap geocoding.
+
+Advanced technique notes:
+- Uses `functools.lru_cache` memoization (beyond CS1) to cache remote
+  OpenStreetMap Nominatim/Photon responses so repeated lookups avoid latency.
+- Pre-indexes `CYCLING_LOCATIONS` into an O(1) lowercase lookup dictionary for
+  instant address resolution without linear scans on every render.
+- Detects the browser Pyodide runtime (`pyodide.http.open_url`) with a local
+  `urllib.request` fallback so live address lookup works both in-browser and
+  in local Python without external dependencies.
 """
-geocoding.py - Address resolution, geocoding, and rich cycling location autocomplete for SafeCycle
-"""
+
 import functools
 import json
-import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 from models import Coordinate
 
-# Comprehensive categorized bicycle destinations and landmarks
 CYCLING_LOCATIONS: List[Dict[str, Any]] = [
-    # Delaware Newark/Kirkwood Corridor (User route)
     {
         "name": "Louis Redding Hall, Newark, DE",
         "city": "Newark, DE",
         "category": "Campus Corridor",
-        "icon": "campus",
-        "desc": "University of Delaware campus cycle corridor along S College Ave",
-        "lat": 39.676456, "lon": -75.747050
+        "lat": 39.676456,
+        "lon": -75.747050,
     },
     {
         "name": "Kirkwood, DE",
         "city": "Kirkwood, DE",
         "category": "Trail Endpoint",
-        "icon": "target",
-        "desc": "Kirkwood community and C&D Canal trailhead connector",
-        "lat": 39.571807, "lon": -75.696079
+        "lat": 39.571807,
+        "lon": -75.696079,
     },
     {
         "name": "University of Delaware, Newark, DE",
         "city": "Newark, DE",
         "category": "Campus Corridor",
-        "icon": "campus",
-        "desc": "The Green and University of Delaware Newark cycling hub",
-        "lat": 39.678044, "lon": -75.750668
-    },
-    {
-        "name": "Lums Pond State Park, DE",
-        "city": "Kirkwood, DE",
-        "category": "Park Route",
-        "icon": "park",
-        "desc": "Scenic perimeter trail and cycling loops around Lums Pond",
-        "lat": 39.559389, "lon": -75.719335
+        "lat": 39.678044,
+        "lon": -75.750668,
     },
     {
         "name": "Glasgow Park, Newark, DE",
         "city": "Newark, DE",
         "category": "Park Route",
-        "icon": "bike",
-        "desc": "Dedicated multi-use paved cycling loop along Route 40 & Route 896",
-        "lat": 39.610684, "lon": -75.729030
+        "lat": 39.610684,
+        "lon": -75.729030,
+    },
+    {
+        "name": "Lums Pond State Park, DE",
+        "city": "Kirkwood, DE",
+        "category": "Park Route",
+        "lat": 39.559389,
+        "lon": -75.719335,
     },
     {
         "name": "Wilmington Riverfront, DE",
         "city": "Wilmington, DE",
         "category": "Greenway Path",
-        "icon": "water",
-        "desc": "Christina Riverfront bike path connecting to Jack A. Markell Trail",
-        "lat": 39.734842, "lon": -75.556214
+        "lat": 39.734842,
+        "lon": -75.556214,
     },
-    # New York City
     {
         "name": "Central Park South, New York, NY",
         "city": "New York, NY",
         "category": "Park Route",
-        "icon": "park",
-        "desc": "Gateway to Central Park scenic cycle drives and crosstown paths",
-        "lat": 40.7661, "lon": -73.9772
+        "lat": 40.7661,
+        "lon": -73.9772,
     },
     {
         "name": "Brooklyn Bridge (Manhattan Side), NY",
         "city": "New York, NY",
         "category": "Bridge Bikeway",
-        "icon": "bridge",
-        "desc": "Dedicated two-way grade-separated cycle track over the East River",
-        "lat": 40.7126, "lon": -74.0048
-    },
-    {
-        "name": "Brooklyn Bridge (DUMBO / Brooklyn Side), NY",
-        "city": "New York, NY",
-        "category": "Bridge Bikeway",
-        "icon": "bridge",
-        "desc": "Access point to Brooklyn waterfront greenway and Brooklyn Bridge Park",
-        "lat": 40.7028, "lon": -73.9928
+        "lat": 40.7126,
+        "lon": -74.0048,
     },
     {
         "name": "Hudson River Greenway at 72nd St, NY",
         "city": "New York, NY",
-        "category": "Protected Greenway",
-        "icon": "bike",
-        "desc": "Premier off-street grade-separated waterfront bike highway",
-        "lat": 40.7818, "lon": -73.9877
-    },
-    {
-        "name": "Hudson River Greenway at Chelsea Piers (23rd St), NY",
-        "city": "New York, NY",
-        "category": "Protected Greenway",
-        "icon": "bike",
-        "desc": "Scenic waterfront path separated from motorized highway traffic",
-        "lat": 40.7485, "lon": -74.0080
+        "category": "Greenway Path",
+        "lat": 40.7818,
+        "lon": -73.9877,
     },
     {
         "name": "Hudson River Greenway at Battery Park, NY",
         "city": "New York, NY",
-        "category": "Protected Greenway",
-        "icon": "bike",
-        "desc": "Southern tip connection to East River Bikeway and Staten Island Ferry",
-        "lat": 40.7033, "lon": -74.0170
+        "category": "Greenway Path",
+        "lat": 40.7033,
+        "lon": -74.0170,
     },
     {
         "name": "Prospect Park West, Brooklyn, NY",
-        "city": "New York, NY",
+        "city": "Brooklyn, NY",
         "category": "Park Route",
-        "icon": "park",
-        "desc": "Grand Army Plaza gateway and car-free Prospect Park interior loop",
-        "lat": 40.6655, "lon": -73.9776
+        "lat": 40.6655,
+        "lon": -73.9776,
     },
-    {
-        "name": "Williamsburg Bridge Bike Path (Manhattan Ramp), NY",
-        "city": "New York, NY",
-        "category": "Bridge Bikeway",
-        "icon": "bridge",
-        "desc": "Dedicated grade-separated cycleway connecting Lower East Side & Brooklyn",
-        "lat": 40.7183, "lon": -73.9872
-    },
-    {
-        "name": "Manhattan Bridge Bikeway (Canal St), NY",
-        "city": "New York, NY",
-        "category": "Bridge Bikeway",
-        "icon": "bridge",
-        "desc": "North side protected bicycle lane into Downtown Brooklyn",
-        "lat": 40.7155, "lon": -73.9945
-    },
-    {
-        "name": "Times Square, New York, NY",
-        "city": "New York, NY",
-        "category": "City Landmark",
-        "icon": "city",
-        "desc": "Broadway pedestrian plaza and shared cyclist avenue corridor",
-        "lat": 40.7580, "lon": -73.9855
-    },
-    {
-        "name": "Union Square South, New York, NY",
-        "city": "New York, NY",
-        "category": "City Landmark",
-        "icon": "city",
-        "desc": "Major crosstown bicycle hub connecting Broadway and 14th St paths",
-        "lat": 40.7359, "lon": -73.9911
-    },
-    {
-        "name": "Washington Square Park, New York, NY",
-        "city": "New York, NY",
-        "category": "Park Route",
-        "icon": "park",
-        "desc": "Greenwich Village car-free park perimeter and 5th Ave starting point",
-        "lat": 40.7308, "lon": -73.9973
-    },
-    {
-        "name": "Grand Central Terminal, New York, NY",
-        "city": "New York, NY",
-        "category": "Transit Hub",
-        "icon": "transit",
-        "desc": "Park Ave viaduct junction and East Midtown commuting nexus",
-        "lat": 40.7527, "lon": -73.9772
-    },
-    {
-        "name": "Penn Station / Moynihan Train Hall, NY",
-        "city": "New York, NY",
-        "category": "Transit Hub",
-        "icon": "transit",
-        "desc": "Major transit terminal with 8th Ave and 9th Ave protected bike lanes",
-        "lat": 40.7506, "lon": -73.9935
-    },
-    {
-        "name": "Flushing Meadows Corona Park, Queens, NY",
-        "city": "New York, NY",
-        "category": "Park Route",
-        "icon": "park",
-        "desc": "Expansive paved greenway loops around Meadow Lake and Unisphere",
-        "lat": 40.7498, "lon": -73.8465
-    },
-
-    # San Francisco & Bay Area
     {
         "name": "Market St at 4th St, San Francisco, CA",
         "city": "San Francisco, CA",
-        "category": "City Landmark",
-        "icon": "city",
-        "desc": "Car-free Better Market Street bicycle corridor and transit arterial",
-        "lat": 37.7858, "lon": -122.4065
+        "category": "Downtown Hub",
+        "lat": 37.7858,
+        "lon": -122.4058,
     },
     {
         "name": "Golden Gate Park Panhandle, San Francisco, CA",
         "city": "San Francisco, CA",
-        "category": "Protected Greenway",
-        "icon": "bike",
-        "desc": "Tree-lined protected cycle boulevard leading into JFK Promenade",
-        "lat": 37.7719, "lon": -122.4468
-    },
-    {
-        "name": "The Embarcadero at Ferry Building, SF, CA",
-        "city": "San Francisco, CA",
-        "category": "Protected Greenway",
-        "icon": "bike",
-        "desc": "Wide waterfront promenade with separated bayside bike paths",
-        "lat": 37.7955, "lon": -122.3937
-    },
-    {
-        "name": "Golden Gate Bridge South Vista Point, SF, CA",
-        "city": "San Francisco, CA",
-        "category": "Bridge Bikeway",
-        "icon": "bridge",
-        "desc": "Iconic world-famous bicycle crossing into Marin County Headlands",
-        "lat": 37.8078, "lon": -122.4751
-    },
-    {
-        "name": "Valencia St Bikeway (16th St), San Francisco, CA",
-        "city": "San Francisco, CA",
-        "category": "Protected Greenway",
-        "icon": "bike",
-        "desc": "Mission District center-running cycle track with bicycle signals",
-        "lat": 37.7650, "lon": -122.4219
-    },
-    {
-        "name": "Crissy Field Promenade, San Francisco, CA",
-        "city": "San Francisco, CA",
         "category": "Park Route",
-        "icon": "park",
-        "desc": "Flat bayside multi-use path with sweeping bridge views",
-        "lat": 37.8045, "lon": -122.4660
+        "lat": 37.7722,
+        "lon": -122.4484,
     },
-
-    # Pacific Northwest & Western Hubs
+    {
+        "name": "Ferry Building Embarcadero, San Francisco, CA",
+        "city": "San Francisco, CA",
+        "category": "Waterfront Path",
+        "lat": 37.7955,
+        "lon": -122.3937,
+    },
     {
         "name": "Seattle Waterfront / Pike Place, WA",
         "city": "Seattle, WA",
-        "category": "City Landmark",
-        "icon": "city",
-        "desc": "New Alaskan Way protected bicycle pathway and Elliott Bay Trail",
-        "lat": 47.6097, "lon": -122.3421
+        "category": "Waterfront Path",
+        "lat": 47.6085,
+        "lon": -122.3406,
     },
     {
         "name": "Burke-Gilman Trail at UW, Seattle, WA",
         "city": "Seattle, WA",
-        "category": "Protected Greenway",
-        "icon": "bike",
-        "desc": "27-mile continuous multi-use rail-trail connecting northern Seattle",
-        "lat": 47.6538, "lon": -122.3078
+        "category": "Greenway Path",
+        "lat": 47.6512,
+        "lon": -122.3075,
     },
     {
         "name": "Portland Waterfront Park, OR",
         "city": "Portland, OR",
-        "category": "Protected Greenway",
-        "icon": "bike",
-        "desc": "Governor Tom McCall Waterfront Park and Willamette river loop",
-        "lat": 45.5186, "lon": -122.6738
+        "category": "Waterfront Path",
+        "lat": 45.5202,
+        "lon": -122.6708,
     },
     {
-        "name": "Tilikum Crossing (Bridge of the People), Portland, OR",
+        "name": "Tilikum Crossing, Portland, OR",
         "city": "Portland, OR",
         "category": "Bridge Bikeway",
-        "icon": "bridge",
-        "desc": "Car-free cable-stayed bridge reserved exclusively for bikes, transit & walkers",
-        "lat": 45.5053, "lon": -122.6663
+        "lat": 45.5050,
+        "lon": -122.6659,
     },
-
-    # Chicago, Boston, DC, Austin
-    {
-        "name": "Chicago Lakefront Trail at Navy Pier, IL",
-        "city": "Chicago, IL",
-        "category": "Protected Greenway",
-        "icon": "bike",
-        "desc": "18.5-mile grade-separated lakefront trail with dedicated bike lanes",
-        "lat": 41.8917, "lon": -87.6086
-    },
-    {
-        "name": "Charles River Esplanade, Boston, MA",
-        "city": "Boston, MA",
-        "category": "Park Route",
-        "icon": "park",
-        "desc": "Continuous river path connecting Boston and Cambridge without cross-traffic",
-        "lat": 42.3554, "lon": -71.0776
-    },
-    {
-        "name": "National Mall / Lincoln Memorial Bikeway, Washington, DC",
-        "city": "Washington, DC",
-        "category": "City Landmark",
-        "icon": "city",
-        "desc": "Monumental wide cycleways connecting Capitol Hill and Potomac riverfront",
-        "lat": 38.8893, "lon": -77.0502
-    },
-    {
-        "name": "Mount Vernon Trail at Georgetown, Washington, DC",
-        "city": "Washington, DC",
-        "category": "Protected Greenway",
-        "icon": "bike",
-        "desc": "Paved scenic trail running south along the western bank of Potomac",
-        "lat": 38.9036, "lon": -77.0673
-    },
-    {
-        "name": "Lady Bird Lake Trail at Pfluger Bridge, Austin, TX",
-        "city": "Austin, TX",
-        "category": "Protected Greenway",
-        "icon": "bike",
-        "desc": "Scenic Ann and Roy Butler Boardwalk and dedicated pedestrian/bike bridge",
-        "lat": 30.2644, "lon": -97.7533
-    }
 ]
 
-# Preset locations dictionary for backward-compatibility with existing tests and modules
 PRESET_LOCATIONS: Dict[str, Coordinate] = {
-    loc["name"]: Coordinate(loc["lat"], loc["lon"]) for loc in CYCLING_LOCATIONS
+    location["name"]: Coordinate(location["lat"], location["lon"])
+    for location in CYCLING_LOCATIONS
 }
 
-def get_all_suggestions() -> List[Dict[str, Any]]:
-    """Return all curated cycling suggestions."""
-    return CYCLING_LOCATIONS
-
-def get_suggestions_json() -> str:
-    """Return JSON string of suggestions for frontend autocomplete dropdown."""
-    return json.dumps(CYCLING_LOCATIONS)
-
-def _is_urlopen_mocked() -> bool:
-    """Return True when urllib.request.urlopen is replaced by unittest.mock during tests."""
-    mod = sys.modules.get("unittest.mock")
-    if mod is not None:
-        mock_cls = getattr(mod, "NonCallableMock", None)
-        if mock_cls is not None and isinstance(urllib.request.urlopen, mock_cls):
-            return True
-    return False
+EXACT_LOCATION_INDEX: Dict[str, Tuple[Coordinate, str]] = {
+    location["name"].lower(): (
+        Coordinate(location["lat"], location["lon"]),
+        location["name"],
+    )
+    for location in CYCLING_LOCATIONS
+}
 
 
-def _fetch_remote_geocode_uncached(
-    clean_addr: str,
-    search_query: str,
-) -> Optional[Tuple[float, float, str]]:
-    """Query Photon and Nominatim geocoders with fast 2.0s timeouts.
+def search_location_suggestions(
+    query: str, limit: int = 6
+) -> List[Dict[str, str]]:
+    """Return matching local cycling locations for instant autofill dropdown."""
+    cleaned = (query or "").strip().lower()
+    matches: List[Dict[str, str]] = []
+    for location in CYCLING_LOCATIONS:
+        name = str(location["name"])
+        city = str(location["city"])
+        category = str(location["category"])
+        searchable = f"{name} {city} {category}".lower()
+        if not cleaned or cleaned in searchable:
+            matches.append(
+                {"name": name, "city": city, "category": category}
+            )
+            if len(matches) >= max(1, limit):
+                break
+    return matches
 
-    Advanced technique: uses urllib/Pyodide HTTP clients with short timeouts
-    so interactive lookups never stall when upstream endpoints are slow.
-    """
-    encoded_query = urllib.parse.quote(search_query)
-    photon_url = f"https://photon.komoot.io/api/?q={encoded_query}&limit=1"
-    headers = {"User-Agent": "SafeCycle-Bike-Planner/2.1 (contact: safety@safecycle.org)"}
-    try:
-        data = None
-        try:
-            from pyodide.http import open_url
-            with open_url(photon_url) as res:
-                data = json.loads(res.read())
-        except Exception:
-            req = urllib.request.Request(photon_url, headers=headers)
-            with urllib.request.urlopen(req, timeout=2.0) as res:
-                if res.status == 200:
-                    data = json.loads(res.read().decode())
-        if data:
-            features = data.get("features", [])
-            if features:
-                coords = features[0]["geometry"]["coordinates"]
-                p = features[0]["properties"]
-                name = p.get("name") or p.get("street") or clean_addr
-                city = p.get("city") or p.get("state") or p.get("country", "")
-                short_disp = f"{name}, {city}" if city and city not in name else name
-                return (float(coords[1]), float(coords[0]), short_disp)
-    except Exception:
-        pass
 
-    nom_base = "https://nominatim.openstreetmap.org/search?q="
-    nom_queries = [
-        f"{nom_base}{encoded_query}&format=json&limit=1&addressdetails=1&countrycodes=us",
-        f"{nom_base}{urllib.parse.quote(clean_addr)}&format=json&limit=1&addressdetails=1",
+def build_location_catalog_json() -> str:
+    """Serialize curated locations with coordinates for browser autofill."""
+    compact_entries = [
+        {
+            "name": str(loc["name"]),
+            "city": str(loc["city"]),
+            "category": str(loc["category"]),
+            "lat": round(float(loc["lat"]), 6),
+            "lon": round(float(loc["lon"]), 6),
+        }
+        for loc in CYCLING_LOCATIONS
     ]
-    for n_url in nom_queries:
-        try:
-            data = None
-            try:
-                from pyodide.http import open_url
-                with open_url(n_url) as res:
-                    data = json.loads(res.read())
-            except Exception:
-                req = urllib.request.Request(n_url, headers=headers)
-                with urllib.request.urlopen(req, timeout=2.0) as res:
-                    if res.status == 200:
-                        data = json.loads(res.read().decode())
-            if data and len(data) > 0:
-                lat = float(data[0]["lat"])
-                lon = float(data[0]["lon"])
-                display = data[0].get("display_name", clean_addr)
-                short_display = ", ".join(display.split(",")[:3])
-                return (lat, lon, short_display)
-        except Exception:
-            pass
+    return json.dumps(compact_entries, separators=(",", ":"))
 
+
+def fetch_json_url(url: str, timeout_secs: float = 3.5) -> Any:
+    """Fetch and parse JSON from a URL via Pyodide or urllib.
+
+    Note: Cannot be unit tested offline because it depends on live HTTP
+    network access to remote OpenStreetMap/OSRM endpoints.
+    """
+    try:
+        from pyodide.http import open_url  # type: ignore
+
+        return json.loads(open_url(url).read())
+    except ImportError:
+        pass
+    except Exception:
+        return None
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "SafeCycle-Drafter/2.0 (CS1 Bicycle Safety Planner)"
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_secs) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return None
+
+
+def parse_coordinate_pair(raw_text: str) -> Optional[Coordinate]:
+    """Parse a 'lat, lon' coordinate pair if values are valid decimal degrees."""
+    parts = [part.strip() for part in raw_text.split(",")]
+    if len(parts) != 2:
+        return None
+    try:
+        latitude = float(parts[0])
+        longitude = float(parts[1])
+    except ValueError:
+        return None
+    if -90.0 <= latitude <= 90.0 and -180.0 <= longitude <= 180.0:
+        return Coordinate(latitude, longitude)
     return None
 
 
 @functools.lru_cache(maxsize=64)
-def _geocode_remote_cached(
-    clean_addr: str,
-    search_query: str,
+def fetch_nominatim_geocode(
+    query: str,
 ) -> Optional[Tuple[float, float, str]]:
-    """Memoize remote geocode responses via functools.lru_cache (advanced technique)."""
-    return _fetch_remote_geocode_uncached(clean_addr, search_query)
+    """Query OpenStreetMap Nominatim (and Photon fallback) for custom addresses.
 
-
-def geocode_address(address_str: str) -> Tuple[Optional[Coordinate], str]:
+    Note: Cannot be unit tested offline because it depends on a live HTTP
+    network call to nominatim.openstreetmap.org / photon.komoot.io.
     """
-    Geocode an address string to Coordinate.
-    Checks preset locations first, then queries OpenStreetMap Photon/Nominatim with caching.
-    Returns (Coordinate, display_label_or_error_message).
-    """
-    clean_addr = address_str.strip()
-    if not clean_addr:
-        return (None, "Please enter a valid street address or location name.")
+    encoded_query = urllib.parse.quote(query)
+    photon_url = (
+        f"https://photon.komoot.io/api/?q={encoded_query}"
+        "&limit=1&lang=en&lat=39.68&lon=-75.75"
+    )
+    photon_data = fetch_json_url(photon_url, timeout_secs=3.0)
+    if isinstance(photon_data, dict):
+        features = photon_data.get("features") or []
+        if features:
+            feat = features[0]
+            coords = (feat.get("geometry") or {}).get("coordinates") or []
+            props = feat.get("properties") or {}
+            if len(coords) >= 2:
+                parts = [
+                    str(props[k])
+                    for k in ("name", "street", "city", "state")
+                    if props.get(k)
+                ]
+                label = ", ".join(dict.fromkeys(parts)) if parts else query
+                return (float(coords[1]), float(coords[0]), label)
 
-    # 1. Check presets (exact or title match first to avoid false positives)
-    for loc in CYCLING_LOCATIONS:
-        name = loc["name"]
-        short_title = name.split(",")[0].strip()
-        if clean_addr.lower() == name.lower() or clean_addr.lower() == short_title.lower():
-            return (Coordinate(loc["lat"], loc["lon"]), name)
+    nom_url = (
+        f"https://nominatim.openstreetmap.org/search?q={encoded_query}"
+        "&format=json&limit=1"
+    )
+    payload = fetch_json_url(nom_url, timeout_secs=3.0)
+    if isinstance(payload, list) and len(payload) > 0:
+        first_match = payload[0]
+        try:
+            return (
+                float(first_match["lat"]),
+                float(first_match["lon"]),
+                str(first_match.get("display_name", query)),
+            )
+        except (ValueError, KeyError, TypeError):
+            pass
+    return None
 
-    # 2. Check if user passed direct "latitude, longitude"
-    if "," in clean_addr:
-        parts = clean_addr.split(",")
-        if len(parts) == 2:
-            try:
-                lat = float(parts[0].strip())
-                lon = float(parts[1].strip())
-                if -90 <= lat <= 90 and -180 <= lon <= 180:
-                    return (Coordinate(lat, lon), f"GPS Coordinates: {lat:.4f}, {lon:.4f}")
-            except ValueError:
-                pass
 
-    # 3. Expand US state abbreviations for worldwide geocoding disambiguation (e.g. DE -> Delaware)
-    us_states = {
-        "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California",
-        "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware", "FL": "Florida", "GA": "Georgia",
-        "HI": "Hawaii", "ID": "Idaho", "IL": "Illinois", "IN": "Indiana", "IA": "Iowa",
-        "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
-        "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi", "MO": "Missouri",
-        "MT": "Montana", "NE": "Nebraska", "NV": "Nevada", "NH": "New Hampshire", "NJ": "New Jersey",
-        "NM": "New Mexico", "NY": "New York", "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio",
-        "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
-        "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VT": "Vermont",
-        "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming",
-    }
-    search_query = clean_addr
-    for abbr, full_state in us_states.items():
-        if clean_addr.upper().endswith(f", {abbr}") or clean_addr.upper().endswith(f" {abbr}"):
-            base = clean_addr[:-len(abbr)].strip().rstrip(",")
-            search_query = f"{base}, {full_state}, USA"
-            break
+def geocode_address(
+    address_text: str, allow_remote: bool = False
+) -> Tuple[Optional[Coordinate], str]:
+    """Resolve an address, catalog name, or 'lat, lon' into a Coordinate."""
+    cleaned = (address_text or "").strip()
+    if not cleaned:
+        return (
+            None,
+            "Please enter a non-empty street address, landmark, or lat, lon.",
+        )
 
-    # 4-5. Query Photon / Nominatim (cached unless mocked in unit tests)
-    if _is_urlopen_mocked():
-        remote_hit = _fetch_remote_geocode_uncached(clean_addr, search_query)
-    else:
-        remote_hit = _geocode_remote_cached(clean_addr, search_query)
-    if remote_hit is not None:
-        return (Coordinate(remote_hit[0], remote_hit[1]), remote_hit[2])
+    lowered = cleaned.lower()
+    exact_hit = EXACT_LOCATION_INDEX.get(lowered)
+    if exact_hit is not None:
+        return exact_hit
 
-    # 6. Fuzzy preset match fallback (contains check or key tokens)
-    clean_lower = clean_addr.lower()
-    for loc in CYCLING_LOCATIONS:
-        name_lower = loc["name"].lower()
-        if clean_lower in name_lower or name_lower in clean_lower:
-            return (Coordinate(loc["lat"], loc["lon"]), loc["name"])
-        tokens = [t for t in clean_lower.replace(",", " ").split() if len(t) >= 4]
-        if tokens and all(t in name_lower for t in tokens):
-            return (Coordinate(loc["lat"], loc["lon"]), loc["name"])
+    for key_lower, coord_pair in EXACT_LOCATION_INDEX.items():
+        if lowered in key_lower or key_lower in lowered:
+            return coord_pair
 
-    # 7. Default to first preset if location is completely unresolvable
-    first_preset = CYCLING_LOCATIONS[0]
-    fallback_label = f"{clean_addr} (Estimated near {first_preset['name']})"
-    return (Coordinate(first_preset["lat"], first_preset["lon"]), fallback_label)
+    parsed_coordinate = parse_coordinate_pair(cleaned)
+    if parsed_coordinate is not None:
+        formatted = (
+            f"{parsed_coordinate.latitude:.4f}, "
+            f"{parsed_coordinate.longitude:.4f}"
+        )
+        return (parsed_coordinate, formatted)
+
+    if allow_remote:
+        remote_result = fetch_nominatim_geocode(cleaned)
+        if remote_result is not None:
+            return (
+                Coordinate(remote_result[0], remote_result[1]),
+                remote_result[2],
+            )
+
+    return (
+        None,
+        f"Could not resolve '{cleaned}'. Pick a suggestion from the location "
+        "autofill dropdown, enter a street address, or type coordinates like "
+        "'39.6765, -75.7471'.",
+    )

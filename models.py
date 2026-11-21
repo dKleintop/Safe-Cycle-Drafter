@@ -1,8 +1,14 @@
+"""models.py - Core Python dataclasses for SafeCycle (Python + Drafter).
+
+Advanced technique note:
+- Uses `dataclasses.field(default_factory=list)` (beyond introductory CS1) so
+  each dataclass instance receives its own independent list instead of sharing
+  a single mutable default list across instances.
 """
-models.py - Core Python data structures for SafeCycle Drafter
-"""
+
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
+
 
 @dataclass
 class Coordinate:
@@ -12,17 +18,20 @@ class Coordinate:
     longitude: float
 
     def to_tuple(self) -> tuple[float, float]:
-        """Return coordinate as a (latitude, longitude) tuple."""
+        """Return this coordinate as a (latitude, longitude) tuple."""
         return (self.latitude, self.longitude)
 
 
 @dataclass
-class HazardReport:
-    """Community-submitted road safety hazard report stored in application state."""
+class RouteSummary:
+    """Compact summary of a generated route option stored in Drafter State."""
 
-    road: str
-    issue: str
-    reported_at: str
+    route_type: str
+    safety_score: float
+    distance_km: float
+    duration_mins: float
+    bike_infra_pct: float
+    high_risk_count: int
 
 
 @dataclass
@@ -33,8 +42,11 @@ class CrashRecord:
     severe_injuries: int = 0
     fatalities: int = 0
     date_range: str = "2022-2025"
-    data_source: str = "Official Municipal Vision Zero Database"
-    limitations: str = "Only police-reported bicycle incidents are recorded."
+    data_source: str = "Municipal Vision Zero & State DOT Crash Ledger"
+    limitations: str = (
+        "Only police-reported bicycle collisions are recorded; near-misses and "
+        "unreported minor falls are excluded."
+    )
 
 
 @dataclass
@@ -45,16 +57,14 @@ class RoadSegment:
     name: str
     coordinates: List[Coordinate]
     length_km: float
-    # Supported infrastructure: 'protected_bike_path', 'separated_lane',
-    # 'painted_lane', 'paved_shoulder', 'traffic_calmed_street', 'shared_lane', 'none'
     infrastructure: str
     speed_limit_mph: Optional[int]
-    traffic_exposure: str  # 'very_low', 'low', 'moderate', 'high', 'heavy'
+    traffic_exposure: str
     crash_record: Optional[CrashRecord]
-    intersection_risk: str  # 'low', 'moderate', 'high_conflict'
-    safety_score: float = 0.0  # 0 to 100
-    confidence: str = "MEDIUM"  # 'HIGH', 'MEDIUM', 'LOW', 'INSUFFICIENT'
-    risk_category: str = "MODERATE"  # 'LOWER_RISK', 'MODERATE', 'ELEVATED', 'HIGH_RISK', 'UNKNOWN'
+    intersection_risk: str
+    safety_score: float = 0.0
+    confidence: str = "MEDIUM"
+    risk_category: str = "MODERATE"
     positive_factors: List[str] = field(default_factory=list)
     negative_factors: List[str] = field(default_factory=list)
     evidence_notes: str = ""
@@ -62,22 +72,10 @@ class RoadSegment:
 
 
 @dataclass
-class TurnInstruction:
-    """Turn-by-turn cycling navigation step along a route."""
-
-    step_number: int
-    instruction: str
-    distance_m: float
-    street_name: str
-    safety_warning: Optional[str] = None
-    icon: str = "straight"  # 'turn_left', 'turn_right', 'straight', 'start', 'end'
-
-
-@dataclass
 class RouteOption:
     """Candidate bicycle route option with safety metrics and segments."""
 
-    route_type: str  # 'Safest', 'Balanced', 'Direct'
+    route_type: str
     total_distance_km: float
     estimated_duration_mins: float
     overall_safety_score: float
@@ -86,24 +84,8 @@ class RouteOption:
     major_intersections_count: int
     warnings: List[str]
     segments: List[RoadSegment]
-    turn_instructions: List[TurnInstruction]
     selection_rationale: str
     confidence_level: str = "MEDIUM"
     elevation_gain_m: float = 24.0
-
-
-@dataclass
-class SavedRouteItem:
-    """Bookmarked cycling route entry persisted to browser or JSON storage."""
-
-    route_id: str
-    name: str
-    start_label: str
-    dest_label: str
-    route_type: str
-    distance_km: float
-    duration_mins: float
-    safety_score: float
-    created_at: str
-    gpx_content: str
-
+    corridor_summary: str = ""
+    routing_source: str = "Local Safety Graph"
