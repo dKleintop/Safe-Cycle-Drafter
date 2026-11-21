@@ -199,8 +199,11 @@ set_site_information(
         "Leaflet interactive maps & Photon / Nominatim geocoding",
         "Municipal Vision Zero & State DOT bicycle crash records (2022-2025)",
         "Drafter Python Web Framework (https://drafter-edu.github.io/drafter/)",
+        "AI USE (chatgpt).txt",
+        "chat_log.md",
+        "AI_Explanation.md"
     ],
-    planning=["CS1 Final Project Design Plan - SafeCycle Python + Drafter"],
+    planning=["CS1 Final Project Design Plan (1).docx"],
     links=["https://github.com/dKleintop/Safe-Cycle-Drafter"],
 )
 set_website_title("SafeCycle - Safety-First Bike Route Planner")
