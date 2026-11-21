@@ -1,0 +1,1 @@
+In the process of creating the safecycle app in Google AI Studio, the chats were automatically deleted and therefore lost. In this repository is the original prompt made for the original app (made in ChatGPT) as well as a recreation of the app with a full chat log, using the original app as inspiration. 
